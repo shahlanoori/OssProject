@@ -604,6 +604,10 @@ namespace MLifter.DAL.Tools
 		/// SettingsCaseSensetive
 		/// </summary>
 		SettingsCaseSensetive,
+        /// <summary>
+        /// SettingsIgnoreAccentChars
+        /// </summary>
+        SettingsIgnoreAccentChars,
 		/// <summary>
 		/// SettingsConfirmDemote
 		/// </summary>
