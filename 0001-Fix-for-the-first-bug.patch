@@ -1,0 +1,77 @@
+From 63db253f6fd2dc9da59eaa398e5de58eb7edc26a Mon Sep 17 00:00:00 2001
+From: Shahla Noori <shahla1361@gmail.com>
+Date: Mon, 25 Nov 2013 22:16:32 -0500
+Subject: [PATCH] Fix for the first bug
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Bug description:
+In textual mode answers the user might include some accented characters
+like "Ã¨" that causes the answer to be considered as wrong, In order to
+fix this issue we mapped all these characters to their unaccented
+equivalents. For example in this case "e".
+A new class is created "IgnoredChar" that takes care of ignoring
+accented characters both in user input and the correct answer if it has
+any.
+---
+ .../Main/MLifter.Components/MLifterTextBox.cs      | 31 +++++++++++++++++++++-
+ 1 file changed, 30 insertions(+), 1 deletion(-)
+
+diff --git a/Source Code/Main/MLifter.Components/MLifterTextBox.cs b/Source Code/Main/MLifter.Components/MLifterTextBox.cs
+index f333f2b..a0b1921 100644
+--- a/Source Code/Main/MLifter.Components/MLifterTextBox.cs	
++++ b/Source Code/Main/MLifter.Components/MLifterTextBox.cs	
+@@ -376,7 +376,8 @@ protected override void OnKeyPress(KeyPressEventArgs e)
+                     strg = str;
+                 strg = validChar.Replace(strg, string.Empty);
+                 strg = RemoveUnicodeFormatChars(strg); //fix for [ML-588]  MLifterTextbox: Unicode control characters in answer cause comparison to fail
+-
++                
++                strg = strg.ReplaceIgnoreCharacter(); //Fix for first bug
+                 openSynonyms.Add(RemoveIgnoreChars(strg));
+             }
+ 
+@@ -400,6 +401,7 @@ protected override void OnKeyPress(KeyPressEventArgs e)
+             {
+                 string strg = CaseSensitive ? str.Trim() : str.ToLower().Trim();
+                 strg = RemoveIgnoreChars(strg);
++                strg = strg.ReplaceIgnoreCharacter(); //Fix for first bug
+ 
+                 if (openSynonyms.Contains(strg))
+                 {
+@@ -771,4 +773,31 @@ private void ClearTipp()
+         }
+ 
+     }
++
++    public static class IgnoredChar
++    {
++
++
++        static Dictionary<string, string> IgnoreChars
++        {
++            get
++            {
++                return new Dictionary<string, string> { { "é", "e" }, { "è", "e" }, { "ê", "e" } };
++            }
++        }
++
++        public static string ReplaceIgnoreCharacter(this string input)
++        {
++            var replacedAnswer = input;
++            foreach (var ignoreChar in IgnoreChars.Keys)
++            {
++                if (input.Contains(ignoreChar))
++                    replacedAnswer = input.Replace(ignoreChar, IgnoreChars[ignoreChar]);
++            }
++
++            return replacedAnswer;
++        }
++
++
++    }
+ }
+-- 
+1.8.4.msysgit.0
+
