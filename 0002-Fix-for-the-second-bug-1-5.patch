@@ -1,0 +1,2114 @@
+From 86544f8e4bc32c1ac5a2cc491904d76f513b39fe Mon Sep 17 00:00:00 2001
+From: Shahla Noori <shahla1361@gmail.com>
+Date: Mon, 25 Nov 2013 22:55:21 -0500
+Subject: [PATCH 2/2] Fix for the second bug (1/5)
+
+DISCLAIMER!
+**Project is not compilable at this point"
+Bug description:
+Adding a new check box in the UI (Learning Options) to let the user
+decide if the accented characters should be ignored or not.
+In the first stage of fixing this issue we only touched the UI classes.
+---
+ .../Main/MLifter.Components/MLifterTextBox.cs      |   14 +-
+ .../MLifter.Controls/LearningWindow/AnswerPanel.cs |    1 +
+ .../Main/MLifter.DAL/Interfaces/ISettings.cs       |    7 +
+ .../MemoryLifter/DialogsConfig/LearnOptions.cs     | 1045 ++++++++++----------
+ .../MemoryLifter/DialogsConfig/LearnOptions.resx   |  403 ++++----
+ 5 files changed, 741 insertions(+), 729 deletions(-)
+
+diff --git a/Source Code/Main/MLifter.Components/MLifterTextBox.cs b/Source Code/Main/MLifter.Components/MLifterTextBox.cs
+index a0b1921..1f1cd07 100644
+--- a/Source Code/Main/MLifter.Components/MLifterTextBox.cs	
++++ b/Source Code/Main/MLifter.Components/MLifterTextBox.cs	
+@@ -82,6 +82,14 @@ public bool CaseSensitive
+             set { caseSensitive = value; }
+         }
+ 
++        private bool ignoreAccentChars;
++        [Browsable(false), ReadOnly(true)]
++        public bool IgnoreAccentChars
++        {
++            get { return ignoreAccentChars; }
++            set { ignoreAccentChars = value; }
++        }
++
+         private bool correctOnTheFly;
+         [Browsable(false), ReadOnly(true)]
+         public bool CorrectOnTheFly
+@@ -376,8 +384,8 @@ protected override void OnKeyPress(KeyPressEventArgs e)
+                     strg = str;
+                 strg = validChar.Replace(strg, string.Empty);
+                 strg = RemoveUnicodeFormatChars(strg); //fix for [ML-588]  MLifterTextbox: Unicode control characters in answer cause comparison to fail
+-                
+-                strg = strg.ReplaceIgnoreCharacter(); //Fix for first bug
++
++                strg = IgnoreAccentChars ? strg.ReplaceIgnoreCharacter() : strg; //Fix for bug 2: If the checkbox for Ignore Accent Chars is checked the accnted chars will be replaced with the unaccented one.
+                 openSynonyms.Add(RemoveIgnoreChars(strg));
+             }
+ 
+@@ -401,7 +409,7 @@ protected override void OnKeyPress(KeyPressEventArgs e)
+             {
+                 string strg = CaseSensitive ? str.Trim() : str.ToLower().Trim();
+                 strg = RemoveIgnoreChars(strg);
+-                strg = strg.ReplaceIgnoreCharacter(); //Fix for first bug
++                strg = IgnoreAccentChars ? strg.ReplaceIgnoreCharacter() : strg;//Fix for bug 2: If the checkbox for Ignore Accent Chars is checked the accnted chars will be replaced with the unaccented one.
+ 
+                 if (openSynonyms.Contains(strg))
+                 {
+diff --git a/Source Code/Main/MLifter.Controls/LearningWindow/AnswerPanel.cs b/Source Code/Main/MLifter.Controls/LearningWindow/AnswerPanel.cs
+index 05d7dc9..98fd8b9 100644
+--- a/Source Code/Main/MLifter.Controls/LearningWindow/AnswerPanel.cs	
++++ b/Source Code/Main/MLifter.Controls/LearningWindow/AnswerPanel.cs	
+@@ -364,6 +364,7 @@ void learnlogic_CardStateChanged(object sender, CardStateChangedEventArgs e)
+                     multiPaneControlMain.SelectedPage = multiPanePageMainTextbox;
+                     mLifterTextBox.IgnoreChars = e.dictionary.Settings.StripChars;
+                     mLifterTextBox.CaseSensitive = e.dictionary.Settings.CaseSensitive.Value;
++                    mLifterTextBox.IgnoreAccentChars = e.dictionary.Settings.IgnoreAccentChars.Value;
+                     mLifterTextBox.CorrectOnTheFly = e.dictionary.Settings.CorrectOnTheFly.Value;
+ 
+                     mLifterTextBox.Synonyms = (e.dictionary.LearnMode == BusinessLayer.LearnModes.Sentence ? card.CurrentAnswerExample : card.CurrentAnswer).ToStringList();
+diff --git a/Source Code/Main/MLifter.DAL/Interfaces/ISettings.cs b/Source Code/Main/MLifter.DAL/Interfaces/ISettings.cs
+index 544ddbf..5cdc48a 100644
+--- a/Source Code/Main/MLifter.DAL/Interfaces/ISettings.cs	
++++ b/Source Code/Main/MLifter.DAL/Interfaces/ISettings.cs	
+@@ -105,6 +105,13 @@ public interface ISettings : ICopy, IParent, ISecurity
+         /// <remarks>Documented by Dev03, 2007-09-04</remarks>
+         [ValueCopy]
+         bool? CaseSensitive { get; set; }
++        /// Gets or sets a value indicating whether [Ignore Accent Chars].
++        /// </summary>
++        /// <value><c>true</c> if [Ignore Accent Chars]; otherwise, <c>false</c>.</value>
++        /// <remarks>Documented by 2013-11-12</remarks>
++        [ValueCopy]
++        bool? IgnoreAccentChars { get; set; }
++        /// <summary>
+         /// <summary>
+         /// Gets or sets a value indicating whether user confirmation is required to confirm demote.
+         /// </summary>
+diff --git a/Source Code/Main/MemoryLifter/DialogsConfig/LearnOptions.cs b/Source Code/Main/MemoryLifter/DialogsConfig/LearnOptions.cs
+index d683834..9383c7f 100644
+--- a/Source Code/Main/MemoryLifter/DialogsConfig/LearnOptions.cs	
++++ b/Source Code/Main/MemoryLifter/DialogsConfig/LearnOptions.cs	
+@@ -45,6 +45,7 @@ public class QueryOptionsForm : System.Windows.Forms.Form
+         private System.Windows.Forms.Label LTeachers;
+         private System.Windows.Forms.CheckBox CBCorrect;
+         private System.Windows.Forms.CheckBox CBCase;
++        private System.Windows.Forms.CheckBox CBIgnore;
+         private System.Windows.Forms.CheckBox CBSelfAssessment;
+         private System.Windows.Forms.Label LIgnore;
+         private System.Windows.Forms.TextBox EStrip;
+@@ -216,7 +217,7 @@ private void LoadOptions(ISettings options)
+             learnModes.SetQueryMultipleChoiceOptions(options.MultipleChoiceOptions);
+ 
+             CBCase.Checked = options.CaseSensitive.Value;
+-
++            CBIgnore.Checked = options.IgnoreAccentChars.Value;
+             CBGeneral0.Checked = options.EnableTimer.Value;
+             CBGeneral1.Checked = options.ShowStatistics.Value;
+             CBGeneral2.Checked = options.ShowImages.Value;
+@@ -406,7 +407,7 @@ private void btnOkay_Click(object sender, System.EventArgs e)
+             if (CBQuit.Checked) Dictionary.Settings.SnoozeOptions.SnoozeMode = ESnoozeMode.QuitProgram;
+             Dictionary.Settings.SelfAssessment = CBSelfAssessment.Checked;
+             Dictionary.Settings.CaseSensitive = CBCase.Checked;
+-
++            Dictionary.Settings.IgnoreAccentChars = CBIgnore.Checked;
+             // saving times ----------------------------------------------------------------------------
+             if (SEMin1.Value > SEMin2.Value)
+                 SEMin1.Value = SEMin2.Value;
+@@ -437,590 +438,582 @@ protected override void Dispose(bool disposing)
+         /// </summary>
+         private void InitializeComponent()
+         {
+-			System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(QueryOptionsForm));
+-			this.PCOptions = new System.Windows.Forms.TabControl();
+-			this.TSTeachers = new System.Windows.Forms.TabPage();
+-			this.pictureBoxTeacherHelp = new System.Windows.Forms.PictureBox();
+-			this.LTeachers = new System.Windows.Forms.Label();
+-			this.GBTeacher = new System.Windows.Forms.GroupBox();
+-			this.labelTeacherLoadingError = new System.Windows.Forms.Label();
+-			this.TSLearning = new System.Windows.Forms.TabPage();
+-			this.learnModes = new MLifter.Controls.LearnModes();
+-			this.TSSynonyms = new System.Windows.Forms.TabPage();
+-			this.GBSynonyms = new System.Windows.Forms.GroupBox();
+-			this.pictureBoxTextInfo = new System.Windows.Forms.PictureBox();
+-			this.labelTextInfo = new System.Windows.Forms.Label();
+-			this.RGSynonym3 = new System.Windows.Forms.RadioButton();
+-			this.RGSynonym4 = new System.Windows.Forms.RadioButton();
+-			this.RGSynonym2 = new System.Windows.Forms.RadioButton();
+-			this.RGSynonym1 = new System.Windows.Forms.RadioButton();
+-			this.RGSynonym0 = new System.Windows.Forms.RadioButton();
+-			this.TSTyping = new System.Windows.Forms.TabPage();
+-			this.EStrip = new System.Windows.Forms.TextBox();
+-			this.LIgnore = new System.Windows.Forms.Label();
+-			this.CBSelfAssessment = new System.Windows.Forms.CheckBox();
+-			this.CBCase = new System.Windows.Forms.CheckBox();
+-			this.CBCorrect = new System.Windows.Forms.CheckBox();
+-			this.GBTyping = new System.Windows.Forms.GroupBox();
+-			this.RGTyping3 = new System.Windows.Forms.RadioButton();
+-			this.RGTyping2 = new System.Windows.Forms.RadioButton();
+-			this.RGTyping1 = new System.Windows.Forms.RadioButton();
+-			this.RGTyping0 = new System.Windows.Forms.RadioButton();
+-			this.TSPlanning = new System.Windows.Forms.TabPage();
+-			this.GBEndSession = new System.Windows.Forms.GroupBox();
+-			this.LblMin = new System.Windows.Forms.Label();
+-			this.LblTo = new System.Windows.Forms.Label();
+-			this.SEMin2 = new System.Windows.Forms.NumericUpDown();
+-			this.SEMin1 = new System.Windows.Forms.NumericUpDown();
+-			this.SERights = new System.Windows.Forms.NumericUpDown();
+-			this.SECards = new System.Windows.Forms.NumericUpDown();
+-			this.SETime = new System.Windows.Forms.NumericUpDown();
+-			this.CBQuit = new System.Windows.Forms.CheckBox();
+-			this.CBSnooze = new System.Windows.Forms.CheckBox();
+-			this.CBRights = new System.Windows.Forms.CheckBox();
+-			this.CBCards = new System.Windows.Forms.CheckBox();
+-			this.CBTime = new System.Windows.Forms.CheckBox();
+-			this.TSGeneral = new System.Windows.Forms.TabPage();
+-			this.GBGeneral = new System.Windows.Forms.GroupBox();
+-			this.checkBoxCheckForBetaUpdates = new System.Windows.Forms.CheckBox();
+-			this.checkBoxUseDictionaryStylesheets = new System.Windows.Forms.CheckBox();
+-			this.checkBoxStartExitSound = new System.Windows.Forms.CheckBox();
+-			this.checkBoxOneInstance = new System.Windows.Forms.CheckBox();
+-			this.CBGeneral3 = new System.Windows.Forms.CheckBox();
+-			this.CBGeneral2 = new System.Windows.Forms.CheckBox();
+-			this.CBGeneral1 = new System.Windows.Forms.CheckBox();
+-			this.CBGeneral0 = new System.Windows.Forms.CheckBox();
+-			this.CBGeneral7 = new System.Windows.Forms.CheckBox();
+-			this.CBGeneral6 = new System.Windows.Forms.CheckBox();
+-			this.CBGeneral5 = new System.Windows.Forms.CheckBox();
+-			this.CBGeneral4 = new System.Windows.Forms.CheckBox();
+-			this.btnOkay = new System.Windows.Forms.Button();
+-			this.btnCancel = new System.Windows.Forms.Button();
+-			this.MainHelp = new System.Windows.Forms.HelpProvider();
+-			this.PCOptions.SuspendLayout();
+-			this.TSTeachers.SuspendLayout();
+-			((System.ComponentModel.ISupportInitialize)(this.pictureBoxTeacherHelp)).BeginInit();
+-			this.GBTeacher.SuspendLayout();
+-			this.TSLearning.SuspendLayout();
+-			this.TSSynonyms.SuspendLayout();
+-			this.GBSynonyms.SuspendLayout();
+-			((System.ComponentModel.ISupportInitialize)(this.pictureBoxTextInfo)).BeginInit();
+-			this.TSTyping.SuspendLayout();
+-			this.GBTyping.SuspendLayout();
+-			this.TSPlanning.SuspendLayout();
+-			this.GBEndSession.SuspendLayout();
+-			((System.ComponentModel.ISupportInitialize)(this.SEMin2)).BeginInit();
+-			((System.ComponentModel.ISupportInitialize)(this.SEMin1)).BeginInit();
+-			((System.ComponentModel.ISupportInitialize)(this.SERights)).BeginInit();
+-			((System.ComponentModel.ISupportInitialize)(this.SECards)).BeginInit();
+-			((System.ComponentModel.ISupportInitialize)(this.SETime)).BeginInit();
+-			this.TSGeneral.SuspendLayout();
+-			this.GBGeneral.SuspendLayout();
+-			this.SuspendLayout();
+-			// 
+-			// PCOptions
+-			// 
+-			this.PCOptions.Controls.Add(this.TSTeachers);
+-			this.PCOptions.Controls.Add(this.TSLearning);
+-			this.PCOptions.Controls.Add(this.TSSynonyms);
+-			this.PCOptions.Controls.Add(this.TSTyping);
+-			this.PCOptions.Controls.Add(this.TSPlanning);
+-			this.PCOptions.Controls.Add(this.TSGeneral);
+-			this.MainHelp.SetHelpNavigator(this.PCOptions, ((System.Windows.Forms.HelpNavigator)(resources.GetObject("PCOptions.HelpNavigator"))));
+-			resources.ApplyResources(this.PCOptions, "PCOptions");
+-			this.PCOptions.Name = "PCOptions";
+-			this.PCOptions.SelectedIndex = 0;
+-			this.MainHelp.SetShowHelp(this.PCOptions, ((bool)(resources.GetObject("PCOptions.ShowHelp"))));
+-			// 
+-			// TSTeachers
+-			// 
+-			this.TSTeachers.Controls.Add(this.pictureBoxTeacherHelp);
+-			this.TSTeachers.Controls.Add(this.LTeachers);
+-			this.TSTeachers.Controls.Add(this.GBTeacher);
+-			this.MainHelp.SetHelpKeyword(this.TSTeachers, resources.GetString("TSTeachers.HelpKeyword"));
+-			this.MainHelp.SetHelpNavigator(this.TSTeachers, ((System.Windows.Forms.HelpNavigator)(resources.GetObject("TSTeachers.HelpNavigator"))));
+-			resources.ApplyResources(this.TSTeachers, "TSTeachers");
+-			this.TSTeachers.Name = "TSTeachers";
+-			this.MainHelp.SetShowHelp(this.TSTeachers, ((bool)(resources.GetObject("TSTeachers.ShowHelp"))));
+-			this.TSTeachers.UseVisualStyleBackColor = true;
+-			// 
+-			// pictureBoxTeacherHelp
+-			// 
+-			this.pictureBoxTeacherHelp.Cursor = System.Windows.Forms.Cursors.Hand;
+-			resources.ApplyResources(this.pictureBoxTeacherHelp, "pictureBoxTeacherHelp");
+-			this.pictureBoxTeacherHelp.Name = "pictureBoxTeacherHelp";
+-			this.MainHelp.SetShowHelp(this.pictureBoxTeacherHelp, ((bool)(resources.GetObject("pictureBoxTeacherHelp.ShowHelp"))));
+-			this.pictureBoxTeacherHelp.TabStop = false;
+-			this.pictureBoxTeacherHelp.Click += new System.EventHandler(this.pictureBoxTeacherHelp_Click);
+-			// 
+-			// LTeachers
+-			// 
+-			resources.ApplyResources(this.LTeachers, "LTeachers");
+-			this.LTeachers.Name = "LTeachers";
+-			// 
+-			// GBTeacher
+-			// 
+-			this.GBTeacher.Controls.Add(this.labelTeacherLoadingError);
+-			resources.ApplyResources(this.GBTeacher, "GBTeacher");
+-			this.GBTeacher.Name = "GBTeacher";
+-			this.GBTeacher.TabStop = false;
+-			// 
+-			// labelTeacherLoadingError
+-			// 
+-			this.labelTeacherLoadingError.ForeColor = System.Drawing.Color.Red;
+-			resources.ApplyResources(this.labelTeacherLoadingError, "labelTeacherLoadingError");
+-			this.labelTeacherLoadingError.Name = "labelTeacherLoadingError";
+-			this.labelTeacherLoadingError.MouseDoubleClick += new System.Windows.Forms.MouseEventHandler(this.labelTeacherLoadingError_MouseDoubleClick);
+-			// 
+-			// TSLearning
+-			// 
+-			this.TSLearning.Controls.Add(this.learnModes);
+-			resources.ApplyResources(this.TSLearning, "TSLearning");
+-			this.TSLearning.Name = "TSLearning";
+-			this.TSLearning.UseVisualStyleBackColor = true;
+-			// 
+-			// learnModes
+-			// 
+-			this.learnModes.AnswerCaption = "Answer";
+-			this.learnModes.EditableControlsEnabled = true;
+-			resources.ApplyResources(this.learnModes, "learnModes");
+-			this.learnModes.MultipleChoiceOptionsVisible = false;
+-			this.learnModes.MultipleDirections = false;
+-			this.learnModes.Name = "learnModes";
+-			this.learnModes.QueryDirection = MLifter.DAL.Interfaces.EQueryDirection.Question2Answer;
+-			this.learnModes.QuestionCaption = "Question";
+-			// 
+-			// TSSynonyms
+-			// 
+-			this.TSSynonyms.Controls.Add(this.GBSynonyms);
+-			resources.ApplyResources(this.TSSynonyms, "TSSynonyms");
+-			this.TSSynonyms.Name = "TSSynonyms";
+-			this.TSSynonyms.UseVisualStyleBackColor = true;
+-			// 
+-			// GBSynonyms
+-			// 
+-			this.GBSynonyms.Controls.Add(this.pictureBoxTextInfo);
+-			this.GBSynonyms.Controls.Add(this.labelTextInfo);
+-			this.GBSynonyms.Controls.Add(this.RGSynonym3);
+-			this.GBSynonyms.Controls.Add(this.RGSynonym4);
+-			this.GBSynonyms.Controls.Add(this.RGSynonym2);
+-			this.GBSynonyms.Controls.Add(this.RGSynonym1);
+-			this.GBSynonyms.Controls.Add(this.RGSynonym0);
+-			resources.ApplyResources(this.GBSynonyms, "GBSynonyms");
+-			this.GBSynonyms.Name = "GBSynonyms";
+-			this.GBSynonyms.TabStop = false;
+-			// 
+-			// pictureBoxTextInfo
+-			// 
+-			resources.ApplyResources(this.pictureBoxTextInfo, "pictureBoxTextInfo");
+-			this.pictureBoxTextInfo.Name = "pictureBoxTextInfo";
+-			this.pictureBoxTextInfo.TabStop = false;
+-			// 
+-			// labelTextInfo
+-			// 
+-			resources.ApplyResources(this.labelTextInfo, "labelTextInfo");
+-			this.labelTextInfo.Name = "labelTextInfo";
+-			// 
+-			// RGSynonym3
+-			// 
+-			resources.ApplyResources(this.RGSynonym3, "RGSynonym3");
+-			this.RGSynonym3.Name = "RGSynonym3";
+-			// 
+-			// RGSynonym4
+-			// 
+-			resources.ApplyResources(this.RGSynonym4, "RGSynonym4");
+-			this.RGSynonym4.Name = "RGSynonym4";
+-			// 
+-			// RGSynonym2
+-			// 
+-			resources.ApplyResources(this.RGSynonym2, "RGSynonym2");
+-			this.RGSynonym2.Name = "RGSynonym2";
+-			// 
+-			// RGSynonym1
+-			// 
+-			resources.ApplyResources(this.RGSynonym1, "RGSynonym1");
+-			this.RGSynonym1.Name = "RGSynonym1";
+-			// 
+-			// RGSynonym0
+-			// 
+-			resources.ApplyResources(this.RGSynonym0, "RGSynonym0");
+-			this.RGSynonym0.Name = "RGSynonym0";
+-			// 
+-			// TSTyping
+-			// 
+-			this.TSTyping.Controls.Add(this.EStrip);
+-			this.TSTyping.Controls.Add(this.LIgnore);
+-			this.TSTyping.Controls.Add(this.CBSelfAssessment);
+-			this.TSTyping.Controls.Add(this.CBCase);
+-			this.TSTyping.Controls.Add(this.CBCorrect);
+-			this.TSTyping.Controls.Add(this.GBTyping);
+-			resources.ApplyResources(this.TSTyping, "TSTyping");
+-			this.TSTyping.Name = "TSTyping";
+-			this.TSTyping.UseVisualStyleBackColor = true;
+-			// 
+-			// EStrip
+-			// 
+-			resources.ApplyResources(this.EStrip, "EStrip");
+-			this.EStrip.Name = "EStrip";
+-			// 
+-			// LIgnore
+-			// 
+-			resources.ApplyResources(this.LIgnore, "LIgnore");
+-			this.LIgnore.Name = "LIgnore";
+-			// 
+-			// CBSelfAssessment
+-			// 
+-			resources.ApplyResources(this.CBSelfAssessment, "CBSelfAssessment");
+-			this.CBSelfAssessment.Name = "CBSelfAssessment";
+-			this.CBSelfAssessment.CheckedChanged += new System.EventHandler(this.CBSelfAssessment_CheckedChanged);
+-			// 
+-			// CBCase
+-			// 
+-			resources.ApplyResources(this.CBCase, "CBCase");
+-			this.CBCase.Name = "CBCase";
+-			// 
+-			// CBCorrect
+-			// 
+-			resources.ApplyResources(this.CBCorrect, "CBCorrect");
+-			this.CBCorrect.Name = "CBCorrect";
+-			this.CBCorrect.CheckedChanged += new System.EventHandler(this.CBCorrect_CheckedChanged);
+-			// 
+-			// GBTyping
+-			// 
+-			this.GBTyping.Controls.Add(this.RGTyping3);
+-			this.GBTyping.Controls.Add(this.RGTyping2);
+-			this.GBTyping.Controls.Add(this.RGTyping1);
+-			this.GBTyping.Controls.Add(this.RGTyping0);
+-			resources.ApplyResources(this.GBTyping, "GBTyping");
+-			this.GBTyping.Name = "GBTyping";
+-			this.GBTyping.TabStop = false;
+-			// 
+-			// RGTyping3
+-			// 
+-			resources.ApplyResources(this.RGTyping3, "RGTyping3");
+-			this.RGTyping3.Name = "RGTyping3";
+-			// 
+-			// RGTyping2
+-			// 
+-			resources.ApplyResources(this.RGTyping2, "RGTyping2");
+-			this.RGTyping2.Name = "RGTyping2";
+-			// 
+-			// RGTyping1
+-			// 
+-			resources.ApplyResources(this.RGTyping1, "RGTyping1");
+-			this.RGTyping1.Name = "RGTyping1";
+-			// 
+-			// RGTyping0
+-			// 
+-			resources.ApplyResources(this.RGTyping0, "RGTyping0");
+-			this.RGTyping0.Name = "RGTyping0";
+-			// 
+-			// TSPlanning
+-			// 
+-			this.TSPlanning.Controls.Add(this.GBEndSession);
+-			resources.ApplyResources(this.TSPlanning, "TSPlanning");
+-			this.TSPlanning.Name = "TSPlanning";
+-			this.TSPlanning.UseVisualStyleBackColor = true;
+-			// 
+-			// GBEndSession
+-			// 
+-			this.GBEndSession.Controls.Add(this.LblMin);
+-			this.GBEndSession.Controls.Add(this.LblTo);
+-			this.GBEndSession.Controls.Add(this.SEMin2);
+-			this.GBEndSession.Controls.Add(this.SEMin1);
+-			this.GBEndSession.Controls.Add(this.SERights);
+-			this.GBEndSession.Controls.Add(this.SECards);
+-			this.GBEndSession.Controls.Add(this.SETime);
+-			this.GBEndSession.Controls.Add(this.CBQuit);
+-			this.GBEndSession.Controls.Add(this.CBSnooze);
+-			this.GBEndSession.Controls.Add(this.CBRights);
+-			this.GBEndSession.Controls.Add(this.CBCards);
+-			this.GBEndSession.Controls.Add(this.CBTime);
+-			resources.ApplyResources(this.GBEndSession, "GBEndSession");
+-			this.GBEndSession.Name = "GBEndSession";
+-			this.GBEndSession.TabStop = false;
+-			// 
+-			// LblMin
+-			// 
+-			resources.ApplyResources(this.LblMin, "LblMin");
+-			this.LblMin.Name = "LblMin";
+-			// 
+-			// LblTo
+-			// 
+-			resources.ApplyResources(this.LblTo, "LblTo");
+-			this.LblTo.Name = "LblTo";
+-			// 
+-			// SEMin2
+-			// 
+-			resources.ApplyResources(this.SEMin2, "SEMin2");
+-			this.SEMin2.Maximum = new decimal(new int[] {
++            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(QueryOptionsForm));
++            this.PCOptions = new System.Windows.Forms.TabControl();
++            this.TSTeachers = new System.Windows.Forms.TabPage();
++            this.pictureBoxTeacherHelp = new System.Windows.Forms.PictureBox();
++            this.LTeachers = new System.Windows.Forms.Label();
++            this.GBTeacher = new System.Windows.Forms.GroupBox();
++            this.labelTeacherLoadingError = new System.Windows.Forms.Label();
++            this.TSLearning = new System.Windows.Forms.TabPage();
++            this.TSSynonyms = new System.Windows.Forms.TabPage();
++            this.GBSynonyms = new System.Windows.Forms.GroupBox();
++            this.pictureBoxTextInfo = new System.Windows.Forms.PictureBox();
++            this.labelTextInfo = new System.Windows.Forms.Label();
++            this.RGSynonym3 = new System.Windows.Forms.RadioButton();
++            this.RGSynonym4 = new System.Windows.Forms.RadioButton();
++            this.RGSynonym2 = new System.Windows.Forms.RadioButton();
++            this.RGSynonym1 = new System.Windows.Forms.RadioButton();
++            this.RGSynonym0 = new System.Windows.Forms.RadioButton();
++            this.TSTyping = new System.Windows.Forms.TabPage();
++            this.EStrip = new System.Windows.Forms.TextBox();
++            this.LIgnore = new System.Windows.Forms.Label();
++            this.CBSelfAssessment = new System.Windows.Forms.CheckBox();
++            this.CBCase = new System.Windows.Forms.CheckBox();
++            this.CBIgnore = new System.Windows.Forms.CheckBox();
++            this.CBCorrect = new System.Windows.Forms.CheckBox();
++            this.GBTyping = new System.Windows.Forms.GroupBox();
++            this.RGTyping3 = new System.Windows.Forms.RadioButton();
++            this.RGTyping2 = new System.Windows.Forms.RadioButton();
++            this.RGTyping1 = new System.Windows.Forms.RadioButton();
++            this.RGTyping0 = new System.Windows.Forms.RadioButton();
++            this.TSPlanning = new System.Windows.Forms.TabPage();
++            this.GBEndSession = new System.Windows.Forms.GroupBox();
++            this.LblMin = new System.Windows.Forms.Label();
++            this.LblTo = new System.Windows.Forms.Label();
++            this.SEMin2 = new System.Windows.Forms.NumericUpDown();
++            this.SEMin1 = new System.Windows.Forms.NumericUpDown();
++            this.SERights = new System.Windows.Forms.NumericUpDown();
++            this.SECards = new System.Windows.Forms.NumericUpDown();
++            this.SETime = new System.Windows.Forms.NumericUpDown();
++            this.CBQuit = new System.Windows.Forms.CheckBox();
++            this.CBSnooze = new System.Windows.Forms.CheckBox();
++            this.CBRights = new System.Windows.Forms.CheckBox();
++            this.CBCards = new System.Windows.Forms.CheckBox();
++            this.CBTime = new System.Windows.Forms.CheckBox();
++            this.TSGeneral = new System.Windows.Forms.TabPage();
++            this.GBGeneral = new System.Windows.Forms.GroupBox();
++            this.checkBoxCheckForBetaUpdates = new System.Windows.Forms.CheckBox();
++            this.checkBoxUseDictionaryStylesheets = new System.Windows.Forms.CheckBox();
++            this.checkBoxStartExitSound = new System.Windows.Forms.CheckBox();
++            this.checkBoxOneInstance = new System.Windows.Forms.CheckBox();
++            this.CBGeneral3 = new System.Windows.Forms.CheckBox();
++            this.CBGeneral2 = new System.Windows.Forms.CheckBox();
++            this.CBGeneral1 = new System.Windows.Forms.CheckBox();
++            this.CBGeneral0 = new System.Windows.Forms.CheckBox();
++            this.CBGeneral7 = new System.Windows.Forms.CheckBox();
++            this.CBGeneral6 = new System.Windows.Forms.CheckBox();
++            this.CBGeneral5 = new System.Windows.Forms.CheckBox();
++            this.CBGeneral4 = new System.Windows.Forms.CheckBox();
++            this.btnOkay = new System.Windows.Forms.Button();
++            this.btnCancel = new System.Windows.Forms.Button();
++            this.MainHelp = new System.Windows.Forms.HelpProvider();
++            this.PCOptions.SuspendLayout();
++            this.TSTeachers.SuspendLayout();
++            ((System.ComponentModel.ISupportInitialize)(this.pictureBoxTeacherHelp)).BeginInit();
++            this.GBTeacher.SuspendLayout();
++            this.TSSynonyms.SuspendLayout();
++            this.GBSynonyms.SuspendLayout();
++            ((System.ComponentModel.ISupportInitialize)(this.pictureBoxTextInfo)).BeginInit();
++            this.TSTyping.SuspendLayout();
++            this.GBTyping.SuspendLayout();
++            this.TSPlanning.SuspendLayout();
++            this.GBEndSession.SuspendLayout();
++            ((System.ComponentModel.ISupportInitialize)(this.SEMin2)).BeginInit();
++            ((System.ComponentModel.ISupportInitialize)(this.SEMin1)).BeginInit();
++            ((System.ComponentModel.ISupportInitialize)(this.SERights)).BeginInit();
++            ((System.ComponentModel.ISupportInitialize)(this.SECards)).BeginInit();
++            ((System.ComponentModel.ISupportInitialize)(this.SETime)).BeginInit();
++            this.TSGeneral.SuspendLayout();
++            this.GBGeneral.SuspendLayout();
++            this.SuspendLayout();
++            // 
++            // PCOptions
++            // 
++            this.PCOptions.Controls.Add(this.TSTeachers);
++            this.PCOptions.Controls.Add(this.TSLearning);
++            this.PCOptions.Controls.Add(this.TSSynonyms);
++            this.PCOptions.Controls.Add(this.TSTyping);
++            this.PCOptions.Controls.Add(this.TSPlanning);
++            this.PCOptions.Controls.Add(this.TSGeneral);
++            this.MainHelp.SetHelpNavigator(this.PCOptions, ((System.Windows.Forms.HelpNavigator)(resources.GetObject("PCOptions.HelpNavigator"))));
++            resources.ApplyResources(this.PCOptions, "PCOptions");
++            this.PCOptions.Name = "PCOptions";
++            this.PCOptions.SelectedIndex = 0;
++            this.MainHelp.SetShowHelp(this.PCOptions, ((bool)(resources.GetObject("PCOptions.ShowHelp"))));
++            // 
++            // TSTeachers
++            // 
++            this.TSTeachers.Controls.Add(this.pictureBoxTeacherHelp);
++            this.TSTeachers.Controls.Add(this.LTeachers);
++            this.TSTeachers.Controls.Add(this.GBTeacher);
++            this.MainHelp.SetHelpKeyword(this.TSTeachers, resources.GetString("TSTeachers.HelpKeyword"));
++            this.MainHelp.SetHelpNavigator(this.TSTeachers, ((System.Windows.Forms.HelpNavigator)(resources.GetObject("TSTeachers.HelpNavigator"))));
++            resources.ApplyResources(this.TSTeachers, "TSTeachers");
++            this.TSTeachers.Name = "TSTeachers";
++            this.MainHelp.SetShowHelp(this.TSTeachers, ((bool)(resources.GetObject("TSTeachers.ShowHelp"))));
++            this.TSTeachers.UseVisualStyleBackColor = true;
++            // 
++            // pictureBoxTeacherHelp
++            // 
++            this.pictureBoxTeacherHelp.Cursor = System.Windows.Forms.Cursors.Hand;
++            resources.ApplyResources(this.pictureBoxTeacherHelp, "pictureBoxTeacherHelp");
++            this.pictureBoxTeacherHelp.Name = "pictureBoxTeacherHelp";
++            this.MainHelp.SetShowHelp(this.pictureBoxTeacherHelp, ((bool)(resources.GetObject("pictureBoxTeacherHelp.ShowHelp"))));
++            this.pictureBoxTeacherHelp.TabStop = false;
++            this.pictureBoxTeacherHelp.Click += new System.EventHandler(this.pictureBoxTeacherHelp_Click);
++            // 
++            // LTeachers
++            // 
++            resources.ApplyResources(this.LTeachers, "LTeachers");
++            this.LTeachers.Name = "LTeachers";
++            // 
++            // GBTeacher
++            // 
++            this.GBTeacher.Controls.Add(this.labelTeacherLoadingError);
++            resources.ApplyResources(this.GBTeacher, "GBTeacher");
++            this.GBTeacher.Name = "GBTeacher";
++            this.GBTeacher.TabStop = false;
++            // 
++            // labelTeacherLoadingError
++            // 
++            this.labelTeacherLoadingError.ForeColor = System.Drawing.Color.Red;
++            resources.ApplyResources(this.labelTeacherLoadingError, "labelTeacherLoadingError");
++            this.labelTeacherLoadingError.Name = "labelTeacherLoadingError";
++            this.labelTeacherLoadingError.MouseDoubleClick += new System.Windows.Forms.MouseEventHandler(this.labelTeacherLoadingError_MouseDoubleClick);
++            // 
++            // TSLearning
++            // 
++            resources.ApplyResources(this.TSLearning, "TSLearning");
++            this.TSLearning.Name = "TSLearning";
++            this.TSLearning.UseVisualStyleBackColor = true;
++            // 
++            // TSSynonyms
++            // 
++            this.TSSynonyms.Controls.Add(this.GBSynonyms);
++            resources.ApplyResources(this.TSSynonyms, "TSSynonyms");
++            this.TSSynonyms.Name = "TSSynonyms";
++            this.TSSynonyms.UseVisualStyleBackColor = true;
++            // 
++            // GBSynonyms
++            // 
++            this.GBSynonyms.Controls.Add(this.pictureBoxTextInfo);
++            this.GBSynonyms.Controls.Add(this.labelTextInfo);
++            this.GBSynonyms.Controls.Add(this.RGSynonym3);
++            this.GBSynonyms.Controls.Add(this.RGSynonym4);
++            this.GBSynonyms.Controls.Add(this.RGSynonym2);
++            this.GBSynonyms.Controls.Add(this.RGSynonym1);
++            this.GBSynonyms.Controls.Add(this.RGSynonym0);
++            resources.ApplyResources(this.GBSynonyms, "GBSynonyms");
++            this.GBSynonyms.Name = "GBSynonyms";
++            this.GBSynonyms.TabStop = false;
++            // 
++            // pictureBoxTextInfo
++            // 
++            resources.ApplyResources(this.pictureBoxTextInfo, "pictureBoxTextInfo");
++            this.pictureBoxTextInfo.Name = "pictureBoxTextInfo";
++            this.pictureBoxTextInfo.TabStop = false;
++            // 
++            // labelTextInfo
++            // 
++            resources.ApplyResources(this.labelTextInfo, "labelTextInfo");
++            this.labelTextInfo.Name = "labelTextInfo";
++            // 
++            // RGSynonym3
++            // 
++            resources.ApplyResources(this.RGSynonym3, "RGSynonym3");
++            this.RGSynonym3.Name = "RGSynonym3";
++            // 
++            // RGSynonym4
++            // 
++            resources.ApplyResources(this.RGSynonym4, "RGSynonym4");
++            this.RGSynonym4.Name = "RGSynonym4";
++            // 
++            // RGSynonym2
++            // 
++            resources.ApplyResources(this.RGSynonym2, "RGSynonym2");
++            this.RGSynonym2.Name = "RGSynonym2";
++            // 
++            // RGSynonym1
++            // 
++            resources.ApplyResources(this.RGSynonym1, "RGSynonym1");
++            this.RGSynonym1.Name = "RGSynonym1";
++            // 
++            // RGSynonym0
++            // 
++            resources.ApplyResources(this.RGSynonym0, "RGSynonym0");
++            this.RGSynonym0.Name = "RGSynonym0";
++            // 
++            // TSTyping
++            // 
++            this.TSTyping.Controls.Add(this.EStrip);
++            this.TSTyping.Controls.Add(this.CBSelfAssessment);
++            this.TSTyping.Controls.Add(this.CBCase);
++            this.TSTyping.Controls.Add(this.CBIgnore);
++            this.TSTyping.Controls.Add(this.CBCorrect);
++            this.TSTyping.Controls.Add(this.GBTyping);
++            this.TSTyping.Controls.Add(this.LIgnore);
++            resources.ApplyResources(this.TSTyping, "TSTyping");
++            this.TSTyping.Name = "TSTyping";
++            this.TSTyping.UseVisualStyleBackColor = true;
++            // 
++            // EStrip
++            // 
++            resources.ApplyResources(this.EStrip, "EStrip");
++            this.EStrip.Name = "EStrip";
++            // 
++            // LIgnore
++            // 
++            resources.ApplyResources(this.LIgnore, "LIgnore");
++            this.LIgnore.Name = "LIgnore";
++            // 
++            // CBSelfAssessment
++            // 
++            resources.ApplyResources(this.CBSelfAssessment, "CBSelfAssessment");
++            this.CBSelfAssessment.Name = "CBSelfAssessment";
++            this.CBSelfAssessment.CheckedChanged += new System.EventHandler(this.CBSelfAssessment_CheckedChanged);
++            // 
++            // CBCase
++            // 
++            resources.ApplyResources(this.CBCase, "CBCase");
++            this.CBCase.Name = "CBCase";
++            // 
++            // CBIgnore
++            // 
++            resources.ApplyResources(this.CBIgnore, "CBIgnore");
++            this.CBIgnore.Name = "CBIgnore";
++            // 
++            // CBCorrect
++            // 
++            resources.ApplyResources(this.CBCorrect, "CBCorrect");
++            this.CBCorrect.Name = "CBCorrect";
++            this.CBCorrect.CheckedChanged += new System.EventHandler(this.CBCorrect_CheckedChanged);
++            // 
++            // GBTyping
++            // 
++            this.GBTyping.Controls.Add(this.RGTyping3);
++            this.GBTyping.Controls.Add(this.RGTyping2);
++            this.GBTyping.Controls.Add(this.RGTyping1);
++            this.GBTyping.Controls.Add(this.RGTyping0);
++            resources.ApplyResources(this.GBTyping, "GBTyping");
++            this.GBTyping.Name = "GBTyping";
++            this.GBTyping.TabStop = false;
++            // 
++            // RGTyping3
++            // 
++            resources.ApplyResources(this.RGTyping3, "RGTyping3");
++            this.RGTyping3.Name = "RGTyping3";
++            // 
++            // RGTyping2
++            // 
++            resources.ApplyResources(this.RGTyping2, "RGTyping2");
++            this.RGTyping2.Name = "RGTyping2";
++            // 
++            // RGTyping1
++            // 
++            resources.ApplyResources(this.RGTyping1, "RGTyping1");
++            this.RGTyping1.Name = "RGTyping1";
++            // 
++            // RGTyping0
++            // 
++            resources.ApplyResources(this.RGTyping0, "RGTyping0");
++            this.RGTyping0.Name = "RGTyping0";
++            // 
++            // TSPlanning
++            // 
++            this.TSPlanning.Controls.Add(this.GBEndSession);
++            resources.ApplyResources(this.TSPlanning, "TSPlanning");
++            this.TSPlanning.Name = "TSPlanning";
++            this.TSPlanning.UseVisualStyleBackColor = true;
++            // 
++            // GBEndSession
++            // 
++            this.GBEndSession.Controls.Add(this.LblMin);
++            this.GBEndSession.Controls.Add(this.LblTo);
++            this.GBEndSession.Controls.Add(this.SEMin2);
++            this.GBEndSession.Controls.Add(this.SEMin1);
++            this.GBEndSession.Controls.Add(this.SERights);
++            this.GBEndSession.Controls.Add(this.SECards);
++            this.GBEndSession.Controls.Add(this.SETime);
++            this.GBEndSession.Controls.Add(this.CBQuit);
++            this.GBEndSession.Controls.Add(this.CBSnooze);
++            this.GBEndSession.Controls.Add(this.CBRights);
++            this.GBEndSession.Controls.Add(this.CBCards);
++            this.GBEndSession.Controls.Add(this.CBTime);
++            resources.ApplyResources(this.GBEndSession, "GBEndSession");
++            this.GBEndSession.Name = "GBEndSession";
++            this.GBEndSession.TabStop = false;
++            // 
++            // LblMin
++            // 
++            resources.ApplyResources(this.LblMin, "LblMin");
++            this.LblMin.Name = "LblMin";
++            // 
++            // LblTo
++            // 
++            resources.ApplyResources(this.LblTo, "LblTo");
++            this.LblTo.Name = "LblTo";
++            // 
++            // SEMin2
++            // 
++            resources.ApplyResources(this.SEMin2, "SEMin2");
++            this.SEMin2.Maximum = new decimal(new int[] {
+             250,
+             0,
+             0,
+             0});
+-			this.SEMin2.Minimum = new decimal(new int[] {
++            this.SEMin2.Minimum = new decimal(new int[] {
+             1,
+             0,
+             0,
+             0});
+-			this.SEMin2.Name = "SEMin2";
+-			this.SEMin2.Value = new decimal(new int[] {
++            this.SEMin2.Name = "SEMin2";
++            this.SEMin2.Value = new decimal(new int[] {
+             110,
+             0,
+             0,
+             0});
+-			this.SEMin2.ValueChanged += new System.EventHandler(this.SEMin2_ValueChanged);
+-			// 
+-			// SEMin1
+-			// 
+-			resources.ApplyResources(this.SEMin1, "SEMin1");
+-			this.SEMin1.Maximum = new decimal(new int[] {
++            this.SEMin2.ValueChanged += new System.EventHandler(this.SEMin2_ValueChanged);
++            // 
++            // SEMin1
++            // 
++            resources.ApplyResources(this.SEMin1, "SEMin1");
++            this.SEMin1.Maximum = new decimal(new int[] {
+             250,
+             0,
+             0,
+             0});
+-			this.SEMin1.Minimum = new decimal(new int[] {
++            this.SEMin1.Minimum = new decimal(new int[] {
+             1,
+             0,
+             0,
+             0});
+-			this.SEMin1.Name = "SEMin1";
+-			this.SEMin1.Value = new decimal(new int[] {
++            this.SEMin1.Name = "SEMin1";
++            this.SEMin1.Value = new decimal(new int[] {
+             110,
+             0,
+             0,
+             0});
+-			this.SEMin1.ValueChanged += new System.EventHandler(this.SEMin1_ValueChanged);
+-			// 
+-			// SERights
+-			// 
+-			resources.ApplyResources(this.SERights, "SERights");
+-			this.SERights.Maximum = new decimal(new int[] {
++            this.SEMin1.ValueChanged += new System.EventHandler(this.SEMin1_ValueChanged);
++            // 
++            // SERights
++            // 
++            resources.ApplyResources(this.SERights, "SERights");
++            this.SERights.Maximum = new decimal(new int[] {
+             250,
+             0,
+             0,
+             0});
+-			this.SERights.Minimum = new decimal(new int[] {
++            this.SERights.Minimum = new decimal(new int[] {
+             1,
+             0,
+             0,
+             0});
+-			this.SERights.Name = "SERights";
+-			this.SERights.Value = new decimal(new int[] {
++            this.SERights.Name = "SERights";
++            this.SERights.Value = new decimal(new int[] {
+             10,
+             0,
+             0,
+             0});
+-			// 
+-			// SECards
+-			// 
+-			resources.ApplyResources(this.SECards, "SECards");
+-			this.SECards.Maximum = new decimal(new int[] {
++            // 
++            // SECards
++            // 
++            resources.ApplyResources(this.SECards, "SECards");
++            this.SECards.Maximum = new decimal(new int[] {
+             250,
+             0,
+             0,
+             0});
+-			this.SECards.Minimum = new decimal(new int[] {
++            this.SECards.Minimum = new decimal(new int[] {
+             1,
+             0,
+             0,
+             0});
+-			this.SECards.Name = "SECards";
+-			this.SECards.Value = new decimal(new int[] {
++            this.SECards.Name = "SECards";
++            this.SECards.Value = new decimal(new int[] {
+             15,
+             0,
+             0,
+             0});
+-			// 
+-			// SETime
+-			// 
+-			resources.ApplyResources(this.SETime, "SETime");
+-			this.SETime.Maximum = new decimal(new int[] {
++            // 
++            // SETime
++            // 
++            resources.ApplyResources(this.SETime, "SETime");
++            this.SETime.Maximum = new decimal(new int[] {
+             120,
+             0,
+             0,
+             0});
+-			this.SETime.Minimum = new decimal(new int[] {
++            this.SETime.Minimum = new decimal(new int[] {
+             1,
+             0,
+             0,
+             0});
+-			this.SETime.Name = "SETime";
+-			this.SETime.Value = new decimal(new int[] {
++            this.SETime.Name = "SETime";
++            this.SETime.Value = new decimal(new int[] {
+             10,
+             0,
+             0,
+             0});
+-			// 
+-			// CBQuit
+-			// 
+-			resources.ApplyResources(this.CBQuit, "CBQuit");
+-			this.CBQuit.Name = "CBQuit";
+-			this.CBQuit.CheckedChanged += new System.EventHandler(this.CBQuit_CheckedChanged);
+-			// 
+-			// CBSnooze
+-			// 
+-			resources.ApplyResources(this.CBSnooze, "CBSnooze");
+-			this.CBSnooze.Name = "CBSnooze";
+-			this.CBSnooze.CheckedChanged += new System.EventHandler(this.CBSnooze_CheckedChanged);
+-			// 
+-			// CBRights
+-			// 
+-			resources.ApplyResources(this.CBRights, "CBRights");
+-			this.CBRights.Name = "CBRights";
+-			this.CBRights.CheckedChanged += new System.EventHandler(this.CBRights_CheckedChanged);
+-			// 
+-			// CBCards
+-			// 
+-			resources.ApplyResources(this.CBCards, "CBCards");
+-			this.CBCards.Name = "CBCards";
+-			this.CBCards.CheckedChanged += new System.EventHandler(this.CBCards_CheckedChanged);
+-			// 
+-			// CBTime
+-			// 
+-			resources.ApplyResources(this.CBTime, "CBTime");
+-			this.CBTime.Name = "CBTime";
+-			this.CBTime.CheckedChanged += new System.EventHandler(this.CBTime_CheckedChanged);
+-			// 
+-			// TSGeneral
+-			// 
+-			this.TSGeneral.Controls.Add(this.GBGeneral);
+-			resources.ApplyResources(this.TSGeneral, "TSGeneral");
+-			this.TSGeneral.Name = "TSGeneral";
+-			this.TSGeneral.UseVisualStyleBackColor = true;
+-			// 
+-			// GBGeneral
+-			// 
+-			this.GBGeneral.Controls.Add(this.checkBoxCheckForBetaUpdates);
+-			this.GBGeneral.Controls.Add(this.checkBoxUseDictionaryStylesheets);
+-			this.GBGeneral.Controls.Add(this.checkBoxStartExitSound);
+-			this.GBGeneral.Controls.Add(this.checkBoxOneInstance);
+-			this.GBGeneral.Controls.Add(this.CBGeneral3);
+-			this.GBGeneral.Controls.Add(this.CBGeneral2);
+-			this.GBGeneral.Controls.Add(this.CBGeneral1);
+-			this.GBGeneral.Controls.Add(this.CBGeneral0);
+-			this.GBGeneral.Controls.Add(this.CBGeneral7);
+-			this.GBGeneral.Controls.Add(this.CBGeneral6);
+-			this.GBGeneral.Controls.Add(this.CBGeneral5);
+-			this.GBGeneral.Controls.Add(this.CBGeneral4);
+-			resources.ApplyResources(this.GBGeneral, "GBGeneral");
+-			this.GBGeneral.Name = "GBGeneral";
+-			this.GBGeneral.TabStop = false;
+-			// 
+-			// checkBoxCheckForBetaUpdates
+-			// 
+-			resources.ApplyResources(this.checkBoxCheckForBetaUpdates, "checkBoxCheckForBetaUpdates");
+-			this.checkBoxCheckForBetaUpdates.Name = "checkBoxCheckForBetaUpdates";
+-			this.checkBoxCheckForBetaUpdates.UseVisualStyleBackColor = true;
+-			// 
+-			// checkBoxUseDictionaryStylesheets
+-			// 
+-			resources.ApplyResources(this.checkBoxUseDictionaryStylesheets, "checkBoxUseDictionaryStylesheets");
+-			this.checkBoxUseDictionaryStylesheets.Name = "checkBoxUseDictionaryStylesheets";
+-			this.MainHelp.SetShowHelp(this.checkBoxUseDictionaryStylesheets, ((bool)(resources.GetObject("checkBoxUseDictionaryStylesheets.ShowHelp"))));
+-			// 
+-			// checkBoxStartExitSound
+-			// 
+-			resources.ApplyResources(this.checkBoxStartExitSound, "checkBoxStartExitSound");
+-			this.checkBoxStartExitSound.Name = "checkBoxStartExitSound";
+-			this.MainHelp.SetShowHelp(this.checkBoxStartExitSound, ((bool)(resources.GetObject("checkBoxStartExitSound.ShowHelp"))));
+-			// 
+-			// checkBoxOneInstance
+-			// 
+-			resources.ApplyResources(this.checkBoxOneInstance, "checkBoxOneInstance");
+-			this.checkBoxOneInstance.Name = "checkBoxOneInstance";
+-			// 
+-			// CBGeneral3
+-			// 
+-			resources.ApplyResources(this.CBGeneral3, "CBGeneral3");
+-			this.CBGeneral3.Name = "CBGeneral3";
+-			// 
+-			// CBGeneral2
+-			// 
+-			resources.ApplyResources(this.CBGeneral2, "CBGeneral2");
+-			this.CBGeneral2.Name = "CBGeneral2";
+-			// 
+-			// CBGeneral1
+-			// 
+-			resources.ApplyResources(this.CBGeneral1, "CBGeneral1");
+-			this.CBGeneral1.Name = "CBGeneral1";
+-			// 
+-			// CBGeneral0
+-			// 
+-			resources.ApplyResources(this.CBGeneral0, "CBGeneral0");
+-			this.CBGeneral0.Name = "CBGeneral0";
+-			// 
+-			// CBGeneral7
+-			// 
+-			resources.ApplyResources(this.CBGeneral7, "CBGeneral7");
+-			this.CBGeneral7.Name = "CBGeneral7";
+-			// 
+-			// CBGeneral6
+-			// 
+-			resources.ApplyResources(this.CBGeneral6, "CBGeneral6");
+-			this.CBGeneral6.Name = "CBGeneral6";
+-			// 
+-			// CBGeneral5
+-			// 
+-			resources.ApplyResources(this.CBGeneral5, "CBGeneral5");
+-			this.CBGeneral5.Name = "CBGeneral5";
+-			// 
+-			// CBGeneral4
+-			// 
+-			resources.ApplyResources(this.CBGeneral4, "CBGeneral4");
+-			this.CBGeneral4.Name = "CBGeneral4";
+-			// 
+-			// btnOkay
+-			// 
+-			resources.ApplyResources(this.btnOkay, "btnOkay");
+-			this.btnOkay.Name = "btnOkay";
+-			this.btnOkay.Click += new System.EventHandler(this.btnOkay_Click);
+-			// 
+-			// btnCancel
+-			// 
+-			this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
+-			resources.ApplyResources(this.btnCancel, "btnCancel");
+-			this.btnCancel.Name = "btnCancel";
+-			// 
+-			// QueryOptionsForm
+-			// 
+-			this.AcceptButton = this.btnOkay;
+-			resources.ApplyResources(this, "$this");
+-			this.CancelButton = this.btnCancel;
+-			this.Controls.Add(this.btnCancel);
+-			this.Controls.Add(this.btnOkay);
+-			this.Controls.Add(this.PCOptions);
+-			this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
+-			this.MainHelp.SetHelpKeyword(this, resources.GetString("$this.HelpKeyword"));
+-			this.MainHelp.SetHelpNavigator(this, ((System.Windows.Forms.HelpNavigator)(resources.GetObject("$this.HelpNavigator"))));
+-			this.MaximizeBox = false;
+-			this.MinimizeBox = false;
+-			this.Name = "QueryOptionsForm";
+-			this.MainHelp.SetShowHelp(this, ((bool)(resources.GetObject("$this.ShowHelp"))));
+-			this.ShowInTaskbar = false;
+-			this.HelpRequested += new System.Windows.Forms.HelpEventHandler(this.QueryOptionsForm_HelpRequested);
+-			this.PCOptions.ResumeLayout(false);
+-			this.TSTeachers.ResumeLayout(false);
+-			((System.ComponentModel.ISupportInitialize)(this.pictureBoxTeacherHelp)).EndInit();
+-			this.GBTeacher.ResumeLayout(false);
+-			this.TSLearning.ResumeLayout(false);
+-			this.TSSynonyms.ResumeLayout(false);
+-			this.GBSynonyms.ResumeLayout(false);
+-			((System.ComponentModel.ISupportInitialize)(this.pictureBoxTextInfo)).EndInit();
+-			this.TSTyping.ResumeLayout(false);
+-			this.TSTyping.PerformLayout();
+-			this.GBTyping.ResumeLayout(false);
+-			this.TSPlanning.ResumeLayout(false);
+-			this.GBEndSession.ResumeLayout(false);
+-			((System.ComponentModel.ISupportInitialize)(this.SEMin2)).EndInit();
+-			((System.ComponentModel.ISupportInitialize)(this.SEMin1)).EndInit();
+-			((System.ComponentModel.ISupportInitialize)(this.SERights)).EndInit();
+-			((System.ComponentModel.ISupportInitialize)(this.SECards)).EndInit();
+-			((System.ComponentModel.ISupportInitialize)(this.SETime)).EndInit();
+-			this.TSGeneral.ResumeLayout(false);
+-			this.GBGeneral.ResumeLayout(false);
+-			this.GBGeneral.PerformLayout();
+-			this.ResumeLayout(false);
++            // 
++            // CBQuit
++            // 
++            resources.ApplyResources(this.CBQuit, "CBQuit");
++            this.CBQuit.Name = "CBQuit";
++            this.CBQuit.CheckedChanged += new System.EventHandler(this.CBQuit_CheckedChanged);
++            // 
++            // CBSnooze
++            // 
++            resources.ApplyResources(this.CBSnooze, "CBSnooze");
++            this.CBSnooze.Name = "CBSnooze";
++            this.CBSnooze.CheckedChanged += new System.EventHandler(this.CBSnooze_CheckedChanged);
++            // 
++            // CBRights
++            // 
++            resources.ApplyResources(this.CBRights, "CBRights");
++            this.CBRights.Name = "CBRights";
++            this.CBRights.CheckedChanged += new System.EventHandler(this.CBRights_CheckedChanged);
++            // 
++            // CBCards
++            // 
++            resources.ApplyResources(this.CBCards, "CBCards");
++            this.CBCards.Name = "CBCards";
++            this.CBCards.CheckedChanged += new System.EventHandler(this.CBCards_CheckedChanged);
++            // 
++            // CBTime
++            // 
++            resources.ApplyResources(this.CBTime, "CBTime");
++            this.CBTime.Name = "CBTime";
++            this.CBTime.CheckedChanged += new System.EventHandler(this.CBTime_CheckedChanged);
++            // 
++            // TSGeneral
++            // 
++            this.TSGeneral.Controls.Add(this.GBGeneral);
++            resources.ApplyResources(this.TSGeneral, "TSGeneral");
++            this.TSGeneral.Name = "TSGeneral";
++            this.TSGeneral.UseVisualStyleBackColor = true;
++            // 
++            // GBGeneral
++            // 
++            this.GBGeneral.Controls.Add(this.checkBoxCheckForBetaUpdates);
++            this.GBGeneral.Controls.Add(this.checkBoxUseDictionaryStylesheets);
++            this.GBGeneral.Controls.Add(this.checkBoxStartExitSound);
++            this.GBGeneral.Controls.Add(this.checkBoxOneInstance);
++            this.GBGeneral.Controls.Add(this.CBGeneral3);
++            this.GBGeneral.Controls.Add(this.CBGeneral2);
++            this.GBGeneral.Controls.Add(this.CBGeneral1);
++            this.GBGeneral.Controls.Add(this.CBGeneral0);
++            this.GBGeneral.Controls.Add(this.CBGeneral7);
++            this.GBGeneral.Controls.Add(this.CBGeneral6);
++            this.GBGeneral.Controls.Add(this.CBGeneral5);
++            this.GBGeneral.Controls.Add(this.CBGeneral4);
++            resources.ApplyResources(this.GBGeneral, "GBGeneral");
++            this.GBGeneral.Name = "GBGeneral";
++            this.GBGeneral.TabStop = false;
++            // 
++            // checkBoxCheckForBetaUpdates
++            // 
++            resources.ApplyResources(this.checkBoxCheckForBetaUpdates, "checkBoxCheckForBetaUpdates");
++            this.checkBoxCheckForBetaUpdates.Name = "checkBoxCheckForBetaUpdates";
++            this.checkBoxCheckForBetaUpdates.UseVisualStyleBackColor = true;
++            // 
++            // checkBoxUseDictionaryStylesheets
++            // 
++            resources.ApplyResources(this.checkBoxUseDictionaryStylesheets, "checkBoxUseDictionaryStylesheets");
++            this.checkBoxUseDictionaryStylesheets.Name = "checkBoxUseDictionaryStylesheets";
++            this.MainHelp.SetShowHelp(this.checkBoxUseDictionaryStylesheets, ((bool)(resources.GetObject("checkBoxUseDictionaryStylesheets.ShowHelp"))));
++            // 
++            // checkBoxStartExitSound
++            // 
++            resources.ApplyResources(this.checkBoxStartExitSound, "checkBoxStartExitSound");
++            this.checkBoxStartExitSound.Name = "checkBoxStartExitSound";
++            this.MainHelp.SetShowHelp(this.checkBoxStartExitSound, ((bool)(resources.GetObject("checkBoxStartExitSound.ShowHelp"))));
++            // 
++            // checkBoxOneInstance
++            // 
++            resources.ApplyResources(this.checkBoxOneInstance, "checkBoxOneInstance");
++            this.checkBoxOneInstance.Name = "checkBoxOneInstance";
++            // 
++            // CBGeneral3
++            // 
++            resources.ApplyResources(this.CBGeneral3, "CBGeneral3");
++            this.CBGeneral3.Name = "CBGeneral3";
++            // 
++            // CBGeneral2
++            // 
++            resources.ApplyResources(this.CBGeneral2, "CBGeneral2");
++            this.CBGeneral2.Name = "CBGeneral2";
++            // 
++            // CBGeneral1
++            // 
++            resources.ApplyResources(this.CBGeneral1, "CBGeneral1");
++            this.CBGeneral1.Name = "CBGeneral1";
++            // 
++            // CBGeneral0
++            // 
++            resources.ApplyResources(this.CBGeneral0, "CBGeneral0");
++            this.CBGeneral0.Name = "CBGeneral0";
++            // 
++            // CBGeneral7
++            // 
++            resources.ApplyResources(this.CBGeneral7, "CBGeneral7");
++            this.CBGeneral7.Name = "CBGeneral7";
++            // 
++            // CBGeneral6
++            // 
++            resources.ApplyResources(this.CBGeneral6, "CBGeneral6");
++            this.CBGeneral6.Name = "CBGeneral6";
++            // 
++            // CBGeneral5
++            // 
++            resources.ApplyResources(this.CBGeneral5, "CBGeneral5");
++            this.CBGeneral5.Name = "CBGeneral5";
++            // 
++            // CBGeneral4
++            // 
++            resources.ApplyResources(this.CBGeneral4, "CBGeneral4");
++            this.CBGeneral4.Name = "CBGeneral4";
++            // 
++            // btnOkay
++            // 
++            resources.ApplyResources(this.btnOkay, "btnOkay");
++            this.btnOkay.Name = "btnOkay";
++            this.btnOkay.Click += new System.EventHandler(this.btnOkay_Click);
++            // 
++            // btnCancel
++            // 
++            this.btnCancel.DialogResult = System.Windows.Forms.DialogResult.Cancel;
++            resources.ApplyResources(this.btnCancel, "btnCancel");
++            this.btnCancel.Name = "btnCancel";
++            // 
++            // QueryOptionsForm
++            // 
++            this.AcceptButton = this.btnOkay;
++            resources.ApplyResources(this, "$this");
++            this.CancelButton = this.btnCancel;
++            this.Controls.Add(this.btnCancel);
++            this.Controls.Add(this.btnOkay);
++            this.Controls.Add(this.PCOptions);
++            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
++            this.MainHelp.SetHelpKeyword(this, resources.GetString("$this.HelpKeyword"));
++            this.MainHelp.SetHelpNavigator(this, ((System.Windows.Forms.HelpNavigator)(resources.GetObject("$this.HelpNavigator"))));
++            this.MaximizeBox = false;
++            this.MinimizeBox = false;
++            this.Name = "QueryOptionsForm";
++            this.MainHelp.SetShowHelp(this, ((bool)(resources.GetObject("$this.ShowHelp"))));
++            this.ShowInTaskbar = false;
++            this.HelpRequested += new System.Windows.Forms.HelpEventHandler(this.QueryOptionsForm_HelpRequested);
++            this.PCOptions.ResumeLayout(false);
++            this.TSTeachers.ResumeLayout(false);
++            ((System.ComponentModel.ISupportInitialize)(this.pictureBoxTeacherHelp)).EndInit();
++            this.GBTeacher.ResumeLayout(false);
++            this.TSSynonyms.ResumeLayout(false);
++            this.GBSynonyms.ResumeLayout(false);
++            ((System.ComponentModel.ISupportInitialize)(this.pictureBoxTextInfo)).EndInit();
++            this.TSTyping.ResumeLayout(false);
++            this.TSTyping.PerformLayout();
++            this.GBTyping.ResumeLayout(false);
++            this.TSPlanning.ResumeLayout(false);
++            this.GBEndSession.ResumeLayout(false);
++            ((System.ComponentModel.ISupportInitialize)(this.SEMin2)).EndInit();
++            ((System.ComponentModel.ISupportInitialize)(this.SEMin1)).EndInit();
++            ((System.ComponentModel.ISupportInitialize)(this.SERights)).EndInit();
++            ((System.ComponentModel.ISupportInitialize)(this.SECards)).EndInit();
++            ((System.ComponentModel.ISupportInitialize)(this.SETime)).EndInit();
++            this.TSGeneral.ResumeLayout(false);
++            this.GBGeneral.ResumeLayout(false);
++            this.GBGeneral.PerformLayout();
++            this.ResumeLayout(false);
+ 
+         }
+         #endregion
+diff --git a/Source Code/Main/MemoryLifter/DialogsConfig/LearnOptions.resx b/Source Code/Main/MemoryLifter/DialogsConfig/LearnOptions.resx
+index 5ab3874..799b5d3 100644
+--- a/Source Code/Main/MemoryLifter/DialogsConfig/LearnOptions.resx	
++++ b/Source Code/Main/MemoryLifter/DialogsConfig/LearnOptions.resx	
+@@ -112,69 +112,69 @@
+     <value>2.0</value>
+   </resheader>
+   <resheader name="reader">
+-    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </resheader>
+   <resheader name="writer">
+-    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </resheader>
+-  <assembly alias="System.Drawing" name="System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" />
++  <assembly alias="System.Drawing" name="System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" />
+   <data name="pictureBoxTeacherHelp.Image" type="System.Drawing.Bitmap, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+     <value>
+         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
+ </value>
+   </data>
+-  <assembly alias="System.Windows.Forms" name="System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
++  <assembly alias="System.Windows.Forms" name="System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
+   <data name="pictureBoxTeacherHelp.ImeMode" type="System.Windows.Forms.ImeMode, System.Windows.Forms">
+     <value>NoControl</value>
+   </data>
+   <data name="pictureBoxTeacherHelp.Location" type="System.Drawing.Point, System.Drawing">
+     <value>465, 182</value>
+   </data>
+-  <metadata name="MainHelp.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
++  <metadata name="MainHelp.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+     <value>17, 17</value>
+   </metadata>
+-  <assembly alias="mscorlib" name="mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
++  <assembly alias="mscorlib" name="mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089" />
+   <data name="pictureBoxTeacherHelp.ShowHelp" type="System.Boolean, mscorlib">
+     <value>True</value>
+   </data>
+@@ -188,7 +188,7 @@
+     <value>pictureBoxTeacherHelp</value>
+   </data>
+   <data name="&gt;&gt;pictureBoxTeacherHelp.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.PictureBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.PictureBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;pictureBoxTeacherHelp.Parent" xml:space="preserve">
+     <value>TSTeachers</value>
+@@ -221,7 +221,7 @@
+     <value>LTeachers</value>
+   </data>
+   <data name="&gt;&gt;LTeachers.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;LTeachers.Parent" xml:space="preserve">
+     <value>TSTeachers</value>
+@@ -251,7 +251,7 @@
+     <value>labelTeacherLoadingError</value>
+   </data>
+   <data name="&gt;&gt;labelTeacherLoadingError.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;labelTeacherLoadingError.Parent" xml:space="preserve">
+     <value>GBTeacher</value>
+@@ -275,7 +275,7 @@
+     <value>GBTeacher</value>
+   </data>
+   <data name="&gt;&gt;GBTeacher.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.GroupBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.GroupBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;GBTeacher.Parent" xml:space="preserve">
+     <value>TSTeachers</value>
+@@ -308,7 +308,7 @@
+     <value>TSTeachers</value>
+   </data>
+   <data name="&gt;&gt;TSTeachers.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;TSTeachers.Parent" xml:space="preserve">
+     <value>PCOptions</value>
+@@ -316,27 +316,6 @@
+   <data name="&gt;&gt;TSTeachers.ZOrder" xml:space="preserve">
+     <value>0</value>
+   </data>
+-  <data name="learnModes.Location" type="System.Drawing.Point, System.Drawing">
+-    <value>0, -1</value>
+-  </data>
+-  <data name="learnModes.Size" type="System.Drawing.Size, System.Drawing">
+-    <value>513, 229</value>
+-  </data>
+-  <data name="learnModes.TabIndex" type="System.Int32, mscorlib">
+-    <value>0</value>
+-  </data>
+-  <data name="&gt;&gt;learnModes.Name" xml:space="preserve">
+-    <value>learnModes</value>
+-  </data>
+-  <data name="&gt;&gt;learnModes.Type" xml:space="preserve">
+-    <value>MLifter.Controls.LearnModes, MLifterControls, Version=2.2.524.0, Culture=neutral, PublicKeyToken=null</value>
+-  </data>
+-  <data name="&gt;&gt;learnModes.Parent" xml:space="preserve">
+-    <value>TSLearning</value>
+-  </data>
+-  <data name="&gt;&gt;learnModes.ZOrder" xml:space="preserve">
+-    <value>0</value>
+-  </data>
+   <data name="TSLearning.Location" type="System.Drawing.Point, System.Drawing">
+     <value>4, 22</value>
+   </data>
+@@ -353,7 +332,7 @@
+     <value>TSLearning</value>
+   </data>
+   <data name="&gt;&gt;TSLearning.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;TSLearning.Parent" xml:space="preserve">
+     <value>PCOptions</value>
+@@ -364,47 +343,47 @@
+   <data name="pictureBoxTextInfo.Image" type="System.Drawing.Bitmap, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+     <value>
+         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
+ </value>
+   </data>
+   <data name="pictureBoxTextInfo.Location" type="System.Drawing.Point, System.Drawing">
+@@ -420,7 +399,7 @@
+     <value>pictureBoxTextInfo</value>
+   </data>
+   <data name="&gt;&gt;pictureBoxTextInfo.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.PictureBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.PictureBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;pictureBoxTextInfo.Parent" xml:space="preserve">
+     <value>GBSynonyms</value>
+@@ -450,7 +429,7 @@
+     <value>labelTextInfo</value>
+   </data>
+   <data name="&gt;&gt;labelTextInfo.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;labelTextInfo.Parent" xml:space="preserve">
+     <value>GBSynonyms</value>
+@@ -477,7 +456,7 @@
+     <value>RGSynonym3</value>
+   </data>
+   <data name="&gt;&gt;RGSynonym3.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;RGSynonym3.Parent" xml:space="preserve">
+     <value>GBSynonyms</value>
+@@ -504,7 +483,7 @@
+     <value>RGSynonym4</value>
+   </data>
+   <data name="&gt;&gt;RGSynonym4.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;RGSynonym4.Parent" xml:space="preserve">
+     <value>GBSynonyms</value>
+@@ -531,7 +510,7 @@
+     <value>RGSynonym2</value>
+   </data>
+   <data name="&gt;&gt;RGSynonym2.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;RGSynonym2.Parent" xml:space="preserve">
+     <value>GBSynonyms</value>
+@@ -558,7 +537,7 @@
+     <value>RGSynonym1</value>
+   </data>
+   <data name="&gt;&gt;RGSynonym1.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;RGSynonym1.Parent" xml:space="preserve">
+     <value>GBSynonyms</value>
+@@ -585,7 +564,7 @@
+     <value>RGSynonym0</value>
+   </data>
+   <data name="&gt;&gt;RGSynonym0.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;RGSynonym0.Parent" xml:space="preserve">
+     <value>GBSynonyms</value>
+@@ -609,7 +588,7 @@
+     <value>GBSynonyms</value>
+   </data>
+   <data name="&gt;&gt;GBSynonyms.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.GroupBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.GroupBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;GBSynonyms.Parent" xml:space="preserve">
+     <value>TSSynonyms</value>
+@@ -633,7 +612,7 @@
+     <value>TSSynonyms</value>
+   </data>
+   <data name="&gt;&gt;TSSynonyms.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;TSSynonyms.Parent" xml:space="preserve">
+     <value>PCOptions</value>
+@@ -642,7 +621,7 @@
+     <value>2</value>
+   </data>
+   <data name="EStrip.Location" type="System.Drawing.Point, System.Drawing">
+-    <value>271, 162</value>
++    <value>271, 171</value>
+   </data>
+   <data name="EStrip.Size" type="System.Drawing.Size, System.Drawing">
+     <value>224, 21</value>
+@@ -654,7 +633,7 @@
+     <value>EStrip</value>
+   </data>
+   <data name="&gt;&gt;EStrip.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.TextBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.TextBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;EStrip.Parent" xml:space="preserve">
+     <value>TSTyping</value>
+@@ -662,36 +641,6 @@
+   <data name="&gt;&gt;EStrip.ZOrder" xml:space="preserve">
+     <value>0</value>
+   </data>
+-  <data name="LIgnore.ImeMode" type="System.Windows.Forms.ImeMode, System.Windows.Forms">
+-    <value>NoControl</value>
+-  </data>
+-  <data name="LIgnore.Location" type="System.Drawing.Point, System.Drawing">
+-    <value>268, 128</value>
+-  </data>
+-  <data name="LIgnore.Size" type="System.Drawing.Size, System.Drawing">
+-    <value>227, 28</value>
+-  </data>
+-  <data name="LIgnore.TabIndex" type="System.Int32, mscorlib">
+-    <value>5</value>
+-  </data>
+-  <data name="LIgnore.Text" xml:space="preserve">
+-    <value>Ignore these characters during correction:</value>
+-  </data>
+-  <data name="LIgnore.TextAlign" type="System.Drawing.ContentAlignment, System.Drawing">
+-    <value>BottomLeft</value>
+-  </data>
+-  <data name="&gt;&gt;LIgnore.Name" xml:space="preserve">
+-    <value>LIgnore</value>
+-  </data>
+-  <data name="&gt;&gt;LIgnore.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+-  </data>
+-  <data name="&gt;&gt;LIgnore.Parent" xml:space="preserve">
+-    <value>TSTyping</value>
+-  </data>
+-  <data name="&gt;&gt;LIgnore.ZOrder" xml:space="preserve">
+-    <value>1</value>
+-  </data>
+   <data name="CBSelfAssessment.ImeMode" type="System.Windows.Forms.ImeMode, System.Windows.Forms">
+     <value>NoControl</value>
+   </data>
+@@ -711,13 +660,13 @@
+     <value>CBSelfAssessment</value>
+   </data>
+   <data name="&gt;&gt;CBSelfAssessment.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBSelfAssessment.Parent" xml:space="preserve">
+     <value>TSTyping</value>
+   </data>
+   <data name="&gt;&gt;CBSelfAssessment.ZOrder" xml:space="preserve">
+-    <value>2</value>
++    <value>1</value>
+   </data>
+   <data name="CBCase.ImeMode" type="System.Windows.Forms.ImeMode, System.Windows.Forms">
+     <value>NoControl</value>
+@@ -738,12 +687,36 @@
+     <value>CBCase</value>
+   </data>
+   <data name="&gt;&gt;CBCase.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBCase.Parent" xml:space="preserve">
+     <value>TSTyping</value>
+   </data>
+   <data name="&gt;&gt;CBCase.ZOrder" xml:space="preserve">
++    <value>2</value>
++  </data>
++  <data name="CBIgnore.Location" type="System.Drawing.Point, System.Drawing">
++    <value>271, 123</value>
++  </data>
++  <data name="CBIgnore.Size" type="System.Drawing.Size, System.Drawing">
++    <value>163, 24</value>
++  </data>
++  <data name="CBIgnore.TabIndex" type="System.Int32, mscorlib">
++    <value>7</value>
++  </data>
++  <data name="CBIgnore.Text" xml:space="preserve">
++    <value>Ignore accented charactres</value>
++  </data>
++  <data name="&gt;&gt;CBIgnore.Name" xml:space="preserve">
++    <value>CBIgnore</value>
++  </data>
++  <data name="&gt;&gt;CBIgnore.Type" xml:space="preserve">
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++  </data>
++  <data name="&gt;&gt;CBIgnore.Parent" xml:space="preserve">
++    <value>TSTyping</value>
++  </data>
++  <data name="&gt;&gt;CBIgnore.ZOrder" xml:space="preserve">
+     <value>3</value>
+   </data>
+   <data name="CBCorrect.ImeMode" type="System.Windows.Forms.ImeMode, System.Windows.Forms">
+@@ -765,7 +738,7 @@
+     <value>CBCorrect</value>
+   </data>
+   <data name="&gt;&gt;CBCorrect.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBCorrect.Parent" xml:space="preserve">
+     <value>TSTyping</value>
+@@ -792,7 +765,7 @@
+     <value>RGTyping3</value>
+   </data>
+   <data name="&gt;&gt;RGTyping3.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;RGTyping3.Parent" xml:space="preserve">
+     <value>GBTyping</value>
+@@ -819,7 +792,7 @@
+     <value>RGTyping2</value>
+   </data>
+   <data name="&gt;&gt;RGTyping2.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;RGTyping2.Parent" xml:space="preserve">
+     <value>GBTyping</value>
+@@ -846,7 +819,7 @@
+     <value>RGTyping1</value>
+   </data>
+   <data name="&gt;&gt;RGTyping1.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;RGTyping1.Parent" xml:space="preserve">
+     <value>GBTyping</value>
+@@ -873,7 +846,7 @@
+     <value>RGTyping0</value>
+   </data>
+   <data name="&gt;&gt;RGTyping0.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.RadioButton, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;RGTyping0.Parent" xml:space="preserve">
+     <value>GBTyping</value>
+@@ -897,7 +870,7 @@
+     <value>GBTyping</value>
+   </data>
+   <data name="&gt;&gt;GBTyping.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.GroupBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.GroupBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;GBTyping.Parent" xml:space="preserve">
+     <value>TSTyping</value>
+@@ -905,6 +878,36 @@
+   <data name="&gt;&gt;GBTyping.ZOrder" xml:space="preserve">
+     <value>5</value>
+   </data>
++  <data name="LIgnore.ImeMode" type="System.Windows.Forms.ImeMode, System.Windows.Forms">
++    <value>NoControl</value>
++  </data>
++  <data name="LIgnore.Location" type="System.Drawing.Point, System.Drawing">
++    <value>268, 137</value>
++  </data>
++  <data name="LIgnore.Size" type="System.Drawing.Size, System.Drawing">
++    <value>227, 28</value>
++  </data>
++  <data name="LIgnore.TabIndex" type="System.Int32, mscorlib">
++    <value>5</value>
++  </data>
++  <data name="LIgnore.Text" xml:space="preserve">
++    <value>Ignore these characters during correction:</value>
++  </data>
++  <data name="LIgnore.TextAlign" type="System.Drawing.ContentAlignment, System.Drawing">
++    <value>BottomLeft</value>
++  </data>
++  <data name="&gt;&gt;LIgnore.Name" xml:space="preserve">
++    <value>LIgnore</value>
++  </data>
++  <data name="&gt;&gt;LIgnore.Type" xml:space="preserve">
++    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++  </data>
++  <data name="&gt;&gt;LIgnore.Parent" xml:space="preserve">
++    <value>TSTyping</value>
++  </data>
++  <data name="&gt;&gt;LIgnore.ZOrder" xml:space="preserve">
++    <value>6</value>
++  </data>
+   <data name="TSTyping.Location" type="System.Drawing.Point, System.Drawing">
+     <value>4, 22</value>
+   </data>
+@@ -921,7 +924,7 @@
+     <value>TSTyping</value>
+   </data>
+   <data name="&gt;&gt;TSTyping.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;TSTyping.Parent" xml:space="preserve">
+     <value>PCOptions</value>
+@@ -948,7 +951,7 @@
+     <value>LblMin</value>
+   </data>
+   <data name="&gt;&gt;LblMin.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;LblMin.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -975,7 +978,7 @@
+     <value>LblTo</value>
+   </data>
+   <data name="&gt;&gt;LblTo.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.Label, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;LblTo.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -996,7 +999,7 @@
+     <value>SEMin2</value>
+   </data>
+   <data name="&gt;&gt;SEMin2.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.NumericUpDown, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.NumericUpDown, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;SEMin2.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -1017,7 +1020,7 @@
+     <value>SEMin1</value>
+   </data>
+   <data name="&gt;&gt;SEMin1.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.NumericUpDown, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.NumericUpDown, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;SEMin1.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -1038,7 +1041,7 @@
+     <value>SERights</value>
+   </data>
+   <data name="&gt;&gt;SERights.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.NumericUpDown, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.NumericUpDown, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;SERights.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -1059,7 +1062,7 @@
+     <value>SECards</value>
+   </data>
+   <data name="&gt;&gt;SECards.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.NumericUpDown, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.NumericUpDown, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;SECards.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -1080,7 +1083,7 @@
+     <value>SETime</value>
+   </data>
+   <data name="&gt;&gt;SETime.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.NumericUpDown, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.NumericUpDown, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;SETime.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -1107,7 +1110,7 @@
+     <value>CBQuit</value>
+   </data>
+   <data name="&gt;&gt;CBQuit.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBQuit.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -1134,7 +1137,7 @@
+     <value>CBSnooze</value>
+   </data>
+   <data name="&gt;&gt;CBSnooze.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBSnooze.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -1161,7 +1164,7 @@
+     <value>CBRights</value>
+   </data>
+   <data name="&gt;&gt;CBRights.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBRights.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -1188,7 +1191,7 @@
+     <value>CBCards</value>
+   </data>
+   <data name="&gt;&gt;CBCards.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBCards.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -1215,7 +1218,7 @@
+     <value>CBTime</value>
+   </data>
+   <data name="&gt;&gt;CBTime.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBTime.Parent" xml:space="preserve">
+     <value>GBEndSession</value>
+@@ -1239,7 +1242,7 @@
+     <value>GBEndSession</value>
+   </data>
+   <data name="&gt;&gt;GBEndSession.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.GroupBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.GroupBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;GBEndSession.Parent" xml:space="preserve">
+     <value>TSPlanning</value>
+@@ -1263,7 +1266,7 @@
+     <value>TSPlanning</value>
+   </data>
+   <data name="&gt;&gt;TSPlanning.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;TSPlanning.Parent" xml:space="preserve">
+     <value>PCOptions</value>
+@@ -1290,7 +1293,7 @@
+     <value>checkBoxCheckForBetaUpdates</value>
+   </data>
+   <data name="&gt;&gt;checkBoxCheckForBetaUpdates.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;checkBoxCheckForBetaUpdates.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1320,7 +1323,7 @@
+     <value>checkBoxUseDictionaryStylesheets</value>
+   </data>
+   <data name="&gt;&gt;checkBoxUseDictionaryStylesheets.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;checkBoxUseDictionaryStylesheets.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1350,7 +1353,7 @@
+     <value>checkBoxStartExitSound</value>
+   </data>
+   <data name="&gt;&gt;checkBoxStartExitSound.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;checkBoxStartExitSound.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1377,7 +1380,7 @@
+     <value>checkBoxOneInstance</value>
+   </data>
+   <data name="&gt;&gt;checkBoxOneInstance.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;checkBoxOneInstance.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1404,7 +1407,7 @@
+     <value>CBGeneral3</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral3.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral3.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1431,7 +1434,7 @@
+     <value>CBGeneral2</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral2.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral2.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1458,7 +1461,7 @@
+     <value>CBGeneral1</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral1.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral1.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1485,7 +1488,7 @@
+     <value>CBGeneral0</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral0.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral0.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1512,7 +1515,7 @@
+     <value>CBGeneral7</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral7.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral7.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1539,7 +1542,7 @@
+     <value>CBGeneral6</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral6.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral6.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1566,7 +1569,7 @@
+     <value>CBGeneral5</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral5.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral5.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1593,7 +1596,7 @@
+     <value>CBGeneral4</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral4.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.CheckBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;CBGeneral4.Parent" xml:space="preserve">
+     <value>GBGeneral</value>
+@@ -1617,7 +1620,7 @@
+     <value>GBGeneral</value>
+   </data>
+   <data name="&gt;&gt;GBGeneral.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.GroupBox, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.GroupBox, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;GBGeneral.Parent" xml:space="preserve">
+     <value>TSGeneral</value>
+@@ -1641,7 +1644,7 @@
+     <value>TSGeneral</value>
+   </data>
+   <data name="&gt;&gt;TSGeneral.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.TabPage, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;TSGeneral.Parent" xml:space="preserve">
+     <value>PCOptions</value>
+@@ -1668,7 +1671,7 @@
+     <value>PCOptions</value>
+   </data>
+   <data name="&gt;&gt;PCOptions.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.TabControl, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.TabControl, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;PCOptions.Parent" xml:space="preserve">
+     <value>$this</value>
+@@ -1695,7 +1698,7 @@
+     <value>btnOkay</value>
+   </data>
+   <data name="&gt;&gt;btnOkay.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.Button, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.Button, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;btnOkay.Parent" xml:space="preserve">
+     <value>$this</value>
+@@ -1722,7 +1725,7 @@
+     <value>btnCancel</value>
+   </data>
+   <data name="&gt;&gt;btnCancel.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.Button, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.Button, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;btnCancel.Parent" xml:space="preserve">
+     <value>$this</value>
+@@ -1730,7 +1733,7 @@
+   <data name="&gt;&gt;btnCancel.ZOrder" xml:space="preserve">
+     <value>0</value>
+   </data>
+-  <metadata name="$this.Localizable" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
++  <metadata name="$this.Localizable" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+     <value>True</value>
+   </metadata>
+   <data name="$this.AutoScaleBaseSize" type="System.Drawing.Size, System.Drawing">
+@@ -2543,12 +2546,12 @@
+     <value>MainHelp</value>
+   </data>
+   <data name="&gt;&gt;MainHelp.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.HelpProvider, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.HelpProvider, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+   <data name="&gt;&gt;$this.Name" xml:space="preserve">
+     <value>QueryOptionsForm</value>
+   </data>
+   <data name="&gt;&gt;$this.Type" xml:space="preserve">
+-    <value>System.Windows.Forms.Form, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
++    <value>System.Windows.Forms.Form, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+   </data>
+ </root>
+\ No newline at end of file
+-- 
+1.8.4.msysgit.0
+
