@@ -1,0 +1,68 @@
+From 69458152864085ae3032dfc453c3e4ab0221aee1 Mon Sep 17 00:00:00 2001
+From: Shahla Noori <shahla1361@gmail.com>
+Date: Mon, 25 Nov 2013 23:11:57 -0500
+Subject: [PATCH] Fix for the second bug (2/5)
+
+DISCLAIMER!
+**Project is not compilable at this point"
+Bug description:
+Adding a new check box in the UI (Learning Options) to let the user
+decide if the accented characters should be ignored or not.
+In the second stage of fixing this issue we only touched the Business
+Layer classes.
+---
+ Source Code/Main/MLifter.BusinessLayer/LearnLogic.cs |  1 +
+ Source Code/Main/MLifter.BusinessLayer/Settings.cs   | 12 ++++++++++++
+ Source Code/Main/MLifter.BusinessLayer/SyncClient.cs |  1 +
+ 3 files changed, 14 insertions(+)
+
+diff --git a/Source Code/Main/MLifter.BusinessLayer/LearnLogic.cs b/Source Code/Main/MLifter.BusinessLayer/LearnLogic.cs
+index 058b3cd..5461e23 100644
+--- a/Source Code/Main/MLifter.BusinessLayer/LearnLogic.cs	
++++ b/Source Code/Main/MLifter.BusinessLayer/LearnLogic.cs	
+@@ -148,6 +148,7 @@ void CardStack_StackChanged(object sender, EventArgs e)
+ 				lls.SessionID = Log.LastSessionID;
+ 				lls.Answer = card.UserAnswer;
+ 				lls.CaseSensitive = card.ParentDictionary.Settings.CaseSensitive;
++                lls.IgnoreAccentChars = card.ParentDictionary.Settings.IgnoreAccentChars;
+ 				lls.CorrectOnTheFly = card.ParentDictionary.Settings.CorrectOnTheFly;
+ 				lls.Direction = card.QueryDirection;
+ 				lls.Duration = ((TimeSpan)(DateTime.Now.Subtract(card.CardAsked))).Seconds;
+diff --git a/Source Code/Main/MLifter.BusinessLayer/Settings.cs b/Source Code/Main/MLifter.BusinessLayer/Settings.cs
+index 914ba20..42ffc85 100644
+--- a/Source Code/Main/MLifter.BusinessLayer/Settings.cs	
++++ b/Source Code/Main/MLifter.BusinessLayer/Settings.cs	
+@@ -171,6 +171,18 @@ public ICardStyle Style
+             }
+         }
+ 
++        public bool? IgnoreAccentChars
++        {
++            get
++            {
++                return userSettings.IgnoreAccentChars ?? defaultSettings.IgnoreAccentChars;
++            }
++            set
++            {
++                userSettings.IgnoreAccentChars = value;
++            }
++        }
++
+         public bool? ConfirmDemote
+         {
+             get
+diff --git a/Source Code/Main/MLifter.BusinessLayer/SyncClient.cs b/Source Code/Main/MLifter.BusinessLayer/SyncClient.cs
+index 1bf8c44..7b60a4d 100644
+--- a/Source Code/Main/MLifter.BusinessLayer/SyncClient.cs	
++++ b/Source Code/Main/MLifter.BusinessLayer/SyncClient.cs	
+@@ -377,6 +377,7 @@ public static SyncAgent GetAgent(string serverUri, int learningModuleId, int use
+             syncAgent.Configuration.SyncParameters.Add("answer", string.Empty);
+             syncAgent.Configuration.SyncParameters.Add("direction", -1);
+             syncAgent.Configuration.SyncParameters.Add("case_sensitive", false);
++            syncAgent.Configuration.SyncParameters.Add("ignore_accent_chars", false);
+             syncAgent.Configuration.SyncParameters.Add("correct_on_the_fly", false);
+             syncAgent.Configuration.SyncParameters.Add("percentage_known", -1);
+             syncAgent.Configuration.SyncParameters.Add("percentage_required", -1);
+-- 
+1.8.4.msysgit.0
+
