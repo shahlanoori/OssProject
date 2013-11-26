@@ -1,0 +1,133 @@
+From 4deef79d70f30b346a8620e375de858d5b3636b9 Mon Sep 17 00:00:00 2001
+From: Shahla Noori <shahla1361@gmail.com>
+Date: Tue, 26 Nov 2013 00:04:07 -0500
+Subject: [PATCH] Fix for the second bug (5/5)
+
+DISCLAIMER!
+**Project is not compilable at this point"
+Bug description:
+Adding a new check box in the UI (Learning Options) to let the user
+decide if the accented characters should be ignored or not.
+In the fifth stage of fixing this issue we only touched the Unit Tests .
+---
+ .../Main/MLifter.UnitTests/BusinessLayer/CopyToTest.cs     |  1 +
+ .../Main/MLifter.UnitTests/BusinessLayer/DictionaryTest.cs | 13 +++++++++++++
+ Source Code/Main/MLifter.UnitTests/DAL/IDictionaryTests.cs |  2 ++
+ Source Code/Main/MLifter.UnitTests/DAL/ISettingsTest.cs    | 14 +++++++++++++-
+ .../Main/MLifter.UnitTests/DAL/TestInfrastructure.cs       |  8 ++++----
+ 5 files changed, 33 insertions(+), 5 deletions(-)
+
+diff --git a/Source Code/Main/MLifter.UnitTests/BusinessLayer/CopyToTest.cs b/Source Code/Main/MLifter.UnitTests/BusinessLayer/CopyToTest.cs
+index 82bbce8..519f79c 100644
+--- a/Source Code/Main/MLifter.UnitTests/BusinessLayer/CopyToTest.cs	
++++ b/Source Code/Main/MLifter.UnitTests/BusinessLayer/CopyToTest.cs	
+@@ -433,6 +433,7 @@ private void CompareSettings(ISettings one, ISettings two)
+                 Assert.AreEqual<bool?>(one.AutoBoxSize, two.AutoBoxSize, "AutoBoxSize do not match");
+                 Assert.AreEqual<bool?>(one.AutoplayAudio, two.AutoplayAudio, "AutoplayAudio do not match");
+                 Assert.AreEqual<bool?>(one.CaseSensitive, two.CaseSensitive, "CaseSensitive do not match");
++                Assert.AreEqual<bool?>(one.IgnoreAccentChars, two.IgnoreAccentChars, "IgnoreAccentChars do not match");
+                 Assert.AreEqual<bool?>(one.ConfirmDemote, two.ConfirmDemote, "ConfirmDemote do not match");
+                 Assert.AreEqual<bool?>(one.CorrectOnTheFly, two.CorrectOnTheFly, "CorrectOnTheFly do not match");
+                 Assert.AreEqual<bool?>(one.EnableCommentary, two.EnableCommentary, "EnableCommentary do not match");
+diff --git a/Source Code/Main/MLifter.UnitTests/BusinessLayer/DictionaryTest.cs b/Source Code/Main/MLifter.UnitTests/BusinessLayer/DictionaryTest.cs
+index 78c43a0..98cd069 100644
+--- a/Source Code/Main/MLifter.UnitTests/BusinessLayer/DictionaryTest.cs	
++++ b/Source Code/Main/MLifter.UnitTests/BusinessLayer/DictionaryTest.cs	
+@@ -664,6 +664,19 @@ public void TestUserSettings()
+                     Assert.AreNotEqual<bool?>(defaultSettings.CaseSensitive, userSettings.CaseSensitive, "Usersettings saved to default settings!");
+ 
+                     #endregion
++                    # region testing IgnoreAccentChars
++
++                    CleanProperties(defaultSettings);
++                    CleanProperties(userSettings);
++
++                    defaultSettings.IgnoreAccentChars = tstBool;
++                    Assert.AreEqual<bool?>(tstBool, settings.IgnoreAccentChars, "Property not read correctly!");
++                    Assert.AreEqual(null, userSettings.IgnoreAccentChars, "Usersetting is not untouched!");
++                    userSettings.CaseSensitive = tstUsrBool;
++                    Assert.AreEqual<bool?>(tstUsrBool, settings.IgnoreAccentChars, "Property not read correctly!");
++                    Assert.AreNotEqual<bool?>(defaultSettings.IgnoreAccentChars, userSettings.IgnoreAccentChars, "Usersettings saved to default settings!");
++
++                    #endregion
+                     # region testing ConfirmDemote
+ 
+                     CleanProperties(defaultSettings);
+diff --git a/Source Code/Main/MLifter.UnitTests/DAL/IDictionaryTests.cs b/Source Code/Main/MLifter.UnitTests/DAL/IDictionaryTests.cs
+index 9191838..7258230 100644
+--- a/Source Code/Main/MLifter.UnitTests/DAL/IDictionaryTests.cs	
++++ b/Source Code/Main/MLifter.UnitTests/DAL/IDictionaryTests.cs	
+@@ -464,6 +464,7 @@ public void IDictionaryQueryOptionsTest()
+ 				{
+ 					testLM.DefaultSettings.AutoplayAudio = true;
+ 					testLM.DefaultSettings.CaseSensitive = false;
++                    testLM.DefaultSettings.IgnoreAccentChars = false;
+ 					testLM.DefaultSettings.ConfirmDemote = true;
+ 					testLM.DefaultSettings.CorrectOnTheFly = false;
+ 					testLM.DefaultSettings.EnableCommentary = true;
+@@ -498,6 +499,7 @@ public void IDictionaryQueryOptionsTest()
+ 
+ 					Assert.IsTrue(testLM.DefaultSettings.AutoplayAudio.Value);
+ 					Assert.IsFalse(testLM.DefaultSettings.CaseSensitive.Value);
++                    Assert.IsFalse(testLM.DefaultSettings.IgnoreAccentChars.Value);
+ 					Assert.IsTrue(testLM.DefaultSettings.ConfirmDemote.Value);
+ 					Assert.IsFalse(testLM.DefaultSettings.CorrectOnTheFly.Value);
+ 					Assert.IsTrue(testLM.DefaultSettings.EnableCommentary.Value);
+diff --git a/Source Code/Main/MLifter.UnitTests/DAL/ISettingsTest.cs b/Source Code/Main/MLifter.UnitTests/DAL/ISettingsTest.cs
+index cddbd1f..900e0bb 100644
+--- a/Source Code/Main/MLifter.UnitTests/DAL/ISettingsTest.cs	
++++ b/Source Code/Main/MLifter.UnitTests/DAL/ISettingsTest.cs	
+@@ -587,7 +587,19 @@ public void ISettingsOtherPropertiesTest()
+ 					Assert.IsFalse(theSettings.CaseSensitive.HasValue, "CaseSensitive Property value although it should not");
+ 				}
+ 
+-
++                //IgnoreAccentChars Property
++                theSettings.IgnoreAccentChars = true;
++                Assert.IsTrue(theSettings.IgnoreAccentChars.HasValue, "IgnoreAccentChars Property has no value although it should");
++                Assert.IsTrue(theSettings.IgnoreAccentChars.Value, "IgnoreAccentChars Property was not set correctly");
++                theSettings.IgnoreAccentChars = false;
++                Assert.IsTrue(theSettings.IgnoreAccentChars.HasValue, "IgnoreAccentChars Property has no value although it should");
++                Assert.IsFalse(theSettings.IgnoreAccentChars.Value, "IgnoreAccentChars Property was not set correctly");
++                if (TestInfrastructure.SupportsNullableValues(TestContext))
++                {
++                    theSettings.IgnoreAccentChars = null;
++                    Assert.IsFalse(theSettings.IgnoreAccentChars.HasValue, "IgnoreAccentChars Property value although it should not");
++                }
++                
+ 				//ConfirmDemote Property
+ 				theSettings.ConfirmDemote = true;
+ 				Assert.IsTrue(theSettings.ConfirmDemote.HasValue, "ConfirmDemote Property has no value although it should");
+diff --git a/Source Code/Main/MLifter.UnitTests/DAL/TestInfrastructure.cs b/Source Code/Main/MLifter.UnitTests/DAL/TestInfrastructure.cs
+index 451eb1c..8149c8d 100644
+--- a/Source Code/Main/MLifter.UnitTests/DAL/TestInfrastructure.cs	
++++ b/Source Code/Main/MLifter.UnitTests/DAL/TestInfrastructure.cs	
+@@ -840,10 +840,10 @@ private static int MsSqlCeCreateNewSettings(string connectionString)
+                 {
+                     cmd.CommandText = "INSERT INTO \"Settings\"" +
+                                       "(snooze_options, multiple_choice_options, query_types, type_gradings, synonym_gradings, query_directions, cardstyle, boxes, " +
+-                                      "autoplay_audio, case_sensitive, confirm_demote, enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, " +
++                                      "autoplay_audio, case_sensitive,ignore_accent_chars, confirm_demote, enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, " +
+                                       "show_images, stripchars, auto_boxsize, pool_empty_message_shown, show_statistics, skip_correct_answers, use_lm_stylesheets)" +
+                                       "VALUES(@snooze_options_id, @multiple_choice_options_id, @query_types_id, @type_gradings_id, @synonym_gradings_id, @query_directions_id, " +
+-                                        "@card_styles_id, @boxes_id, 1, 0, 0, 0, 0, 0, 1, 0, 1, @stripchars, 0, 0, 1, 0, 0);";
++                                        "@card_styles_id, @boxes_id, 1, 0, 0, 0, 0, 0,0, 1, 0, 1, @stripchars, 0, 0, 1, 0, 0);";
+                     cmd.Parameters.Add("@snooze_options_id", snoozeOptionsId);
+                     cmd.Parameters.Add("@multiple_choice_options_id", multipleChoiceOptionsId);
+                     cmd.Parameters.Add("@query_types_id", queryTypesId);
+@@ -981,10 +981,10 @@ private static int MsSqlCeCreateNewAllowedSettings(string connectionString)
+                 {
+                     cmd.CommandText = "INSERT INTO \"Settings\"" +
+                                       "(snooze_options, multiple_choice_options, query_types, type_gradings, synonym_gradings, query_directions, cardstyle, boxes, " +
+-                                      "autoplay_audio, case_sensitive, confirm_demote, enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, " +
++                                      "autoplay_audio, case_sensitive,ignore_accent_chars, confirm_demote, enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, " +
+                                       "show_images, stripchars, auto_boxsize, pool_empty_message_shown, show_statistics, skip_correct_answers, use_lm_stylesheets)" +
+                                       "VALUES(@snooze_options_id, @multiple_choice_options_id, @query_types_id, @type_gradings_id, @synonym_gradings_id, @query_directions_id, " +
+-                                      "@card_styles_id, @boxes_id, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);";
++                                      "@card_styles_id, @boxes_id, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,1);";
+                     cmd.Parameters.Add("@snooze_options_id", snoozeOptionsId);
+                     cmd.Parameters.Add("@multiple_choice_options_id", multipleChoiceOptionsId);
+                     cmd.Parameters.Add("@query_types_id", queryTypesId);
+-- 
+1.8.4.msysgit.0
+
