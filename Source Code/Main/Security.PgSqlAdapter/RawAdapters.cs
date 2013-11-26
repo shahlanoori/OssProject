@@ -16,7 +16,7 @@ using System.Collections.Generic;
 using System.Text;
 using SecurityFramework;
 using Npgsql;
-using System.Diagnostics;
+
 
 namespace SecurityPgSqlAdapter
 {
