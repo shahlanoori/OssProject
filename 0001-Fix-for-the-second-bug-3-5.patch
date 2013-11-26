@@ -1,0 +1,607 @@
+From b74941e5e3823e50dee974978be346b78c7174de Mon Sep 17 00:00:00 2001
+From: Shahla Noori <shahla1361@gmail.com>
+Date: Mon, 25 Nov 2013 23:49:16 -0500
+Subject: [PATCH] Fix for the second bug (3/5)
+
+DISCLAIMER!
+**Project is not compilable at this point"
+Bug description:
+Adding a new check box in the UI (Learning Options) to let the user
+decide if the accented characters should be ignored or not.
+In the third stage of fixing this issue we only touched the Data Access
+Layer classes.
+---
+ Source Code/Main/MLifter.DAL/DB/DbSettings.cs      | 12 ++++
+ .../DB/MSSQLCE/MsSqlCeLearnLoggingConnector.cs     |  5 +-
+ .../DB/MSSQLCE/MsSqlCeSettingsConnector.cs         | 48 ++++++++++++++--
+ .../Main/MLifter.DAL/DB/PostgreSQL/MLifterDB.sql   | 13 +++--
+ .../DB/PostgreSQL/PgSqlLearnLoggingConnector.cs    |  5 +-
+ .../DB/PostgreSQL/PgSqlSettingsConnector.cs        | 30 ++++++++++
+ .../Interfaces/DB/IDbLearnLoggingConnector.cs      |  4 ++
+ .../Interfaces/DB/IDbSettingsConnector.cs          |  3 +
+ .../Main/MLifter.DAL/Interfaces/IQueryOptions.cs   |  4 ++
+ .../Main/MLifter.DAL/Preview/PreviewSettings.cs    | 17 ++++++
+ .../Resources/MsSqlCeDbCreateScript.sql            |  2 +
+ Source Code/Main/MLifter.DAL/Tools/Cache.cs        |  4 ++
+ .../Main/MLifter.DAL/Transformer/V17/Converter.cs  |  1 +
+ .../Main/MLifter.DAL/XML/XmlPresetSettings.cs      | 13 +++++
+ Source Code/Main/MLifter.DAL/XML/XmlSettings.cs    | 67 ++++++++++++++++++++++
+ .../DAL/SettingsTemplate.cs                        |  2 +
+ 16 files changed, 215 insertions(+), 15 deletions(-)
+
+diff --git a/Source Code/Main/MLifter.DAL/DB/DbSettings.cs b/Source Code/Main/MLifter.DAL/DB/DbSettings.cs
+index eb6c589..0157db5 100644
+--- a/Source Code/Main/MLifter.DAL/DB/DbSettings.cs	
++++ b/Source Code/Main/MLifter.DAL/DB/DbSettings.cs	
+@@ -166,6 +166,18 @@ public IGradeSynonyms GradeSynonyms
+             }
+         }
+ 
++        public bool? IgnoreAccentChars
++        {
++            get
++            {
++                return connector.GetIgnoreAccentChars(id);
++            }
++            set
++            {
++                connector.SetIgnoreAccentChars(id, value);
++            }
++        }
++
+         public bool? ConfirmDemote
+         {
+             get
+diff --git a/Source Code/Main/MLifter.DAL/DB/MSSQLCE/MsSqlCeLearnLoggingConnector.cs b/Source Code/Main/MLifter.DAL/DB/MSSQLCE/MsSqlCeLearnLoggingConnector.cs
+index d1807e3..08c6eb3 100644
+--- a/Source Code/Main/MLifter.DAL/DB/MSSQLCE/MsSqlCeLearnLoggingConnector.cs	
++++ b/Source Code/Main/MLifter.DAL/DB/MSSQLCE/MsSqlCeLearnLoggingConnector.cs	
+@@ -79,8 +79,8 @@ public void CreateLearnLogEntry(LearnLogStruct learnLog)
+ 
+             using (SqlCeCommand cmd = MSSQLCEConn.CreateCommand(Parent.CurrentUser))
+             {
+-                cmd.CommandText = "INSERT INTO LearnLog (session_id, user_id, lm_id, cards_id, old_box, new_box, timestamp, duration, learn_mode, move_type, answer, direction, case_sensitive, correct_on_the_fly, percentage_known, percentage_required) ";
+-                cmd.CommandText += "VALUES(@sid, @uid, @lmid, @cid, @obox, @nbox, @ts, @dur, @lmode, @mtype, @answ, @dir, @csen, @cotf, @pknown, @preq); ";
++                cmd.CommandText = "INSERT INTO LearnLog (session_id, user_id, lm_id, cards_id, old_box, new_box, timestamp, duration, learn_mode, move_type, answer, direction, case_sensitive, ignore_accent_chars, correct_on_the_fly, percentage_known, percentage_required) ";
++                cmd.CommandText += "VALUES(@sid, @uid, @lmid, @cid, @obox, @nbox, @ts, @dur, @lmode, @mtype, @answ, @dir, @csen, @iach, @cotf, @pknown, @preq); ";
+                 if (learnLog.MoveType != MoveType.Manual && answeredCardCorrect)
+                     cmd.CommandText += "UPDATE LearningSessions SET sum_right=sum_right + 1 WHERE id=@sid AND user_id=@uid AND lm_id=@lmid; ";
+                 else if (learnLog.MoveType != MoveType.Manual && !answeredCardCorrect)
+@@ -114,6 +114,7 @@ public void CreateLearnLogEntry(LearnLogStruct learnLog)
+                 cmd.Parameters.Add("@answ", learnLog.Answer);
+                 cmd.Parameters.Add("@dir", learnLog.Direction.Value.ToString());
+                 cmd.Parameters.Add("@csen", learnLog.CaseSensitive);
++                cmd.Parameters.Add("@iach", learnLog.IgnoreAccentChars);
+                 cmd.Parameters.Add("@cotf", learnLog.CorrectOnTheFly);
+                 cmd.Parameters.Add("@pknown", learnLog.PercentageKnown);
+                 cmd.Parameters.Add("@preq", learnLog.PercentageRequired);
+diff --git a/Source Code/Main/MLifter.DAL/DB/MSSQLCE/MsSqlCeSettingsConnector.cs b/Source Code/Main/MLifter.DAL/DB/MSSQLCE/MsSqlCeSettingsConnector.cs
+index 6f247aa..087f6e5 100644
+--- a/Source Code/Main/MLifter.DAL/DB/MSSQLCE/MsSqlCeSettingsConnector.cs	
++++ b/Source Code/Main/MLifter.DAL/DB/MSSQLCE/MsSqlCeSettingsConnector.cs	
+@@ -76,6 +76,7 @@ private void GetSettingsValue(int settingsId, CacheObject cacheObjectType, out o
+ 			//read the values
+ 			bool? autoplayAudio = DbValueConverter.Convert<bool>(reader["autoplay_audio"]);
+ 			bool? caseSensitive = DbValueConverter.Convert<bool>(reader["case_sensitive"]);
++            bool? ignoreAccentChars = DbValueConverter.Convert<bool>(reader["ignore_accent_chars"]);
+ 			bool? confirmDemote = DbValueConverter.Convert<bool>(reader["confirm_demote"]);
+ 			bool? enableCommentary = DbValueConverter.Convert<bool>(reader["enable_commentary"]);
+ 			bool? correctOnTheFly = DbValueConverter.Convert<bool>(reader["correct_on_the_fly"]);
+@@ -116,6 +117,7 @@ private void GetSettingsValue(int settingsId, CacheObject cacheObjectType, out o
+ 			DateTime expires = DateTime.Now.Add(Cache.DefaultSettingsValidationTime);
+ 			Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsAutoPlayAudio, settingsId, expires)] = autoplayAudio;
+ 			Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsCaseSensetive, settingsId, expires)] = caseSensitive;
++            Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsIgnoreAccentChars, settingsId, expires)] = ignoreAccentChars;
+ 			Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsConfirmDemote, settingsId, expires)] = confirmDemote;
+ 			Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsEnableCommentary, settingsId, expires)] = enableCommentary;
+ 			Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsCorrectOnTheFly, settingsId, expires)] = correctOnTheFly;
+@@ -152,6 +154,7 @@ private void GetSettingsValue(int settingsId, CacheObject cacheObjectType, out o
+ 			{
+ 				case CacheObject.SettingsAutoPlayAudio: cacheValue = autoplayAudio; break;
+ 				case CacheObject.SettingsCaseSensetive: cacheValue = caseSensitive; break;
++                case CacheObject.SettingsIgnoreAccentChars: cacheValue = ignoreAccentChars; break;
+ 				case CacheObject.SettingsConfirmDemote: cacheValue = confirmDemote; break;
+ 				case CacheObject.SettingsEnableCommentary: cacheValue = enableCommentary; break;
+ 				case CacheObject.SettingsCorrectOnTheFly: cacheValue = correctOnTheFly; break;
+@@ -919,6 +922,39 @@ public void SetCaseSensitive(int id, bool? CaseSensetive)
+ 			Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsCaseSensetive, id, Cache.DefaultSettingsValidationTime)] = CaseSensetive;
+ 		}
+ 
++        /// <summary>
++        /// Gets the ignore accented chars.
++        /// </summary>
++        /// <param name="id">The id.</param>
++        /// <returns></returns>
++        /// <remarks>Documented by Dev05, 2009-01-15</remarks>
++        public bool? GetIgnoreAccentChars(int id)
++        {
++            object cacheValue;
++            if (!SettingsCached(id, CacheObject.SettingsIgnoreAccentChars, out cacheValue))      //if settings are not in Cache --> load them
++                GetSettingsValue(id, CacheObject.SettingsIgnoreAccentChars, out cacheValue);    //Saves the current Settings from the DB to the Cache
++            return cacheValue as bool?;
++        }
++
++        /// <summary>
++        /// Sets the ignore accented chars.
++        /// </summary>
++        /// <param name="id">The id.</param>
++        /// <param name="IgnoreAccentChars">The ignore accented chars.</param>
++        /// <remarks>Documented by Dev05, 2009-01-15</remarks>
++        public void SetIgnoreAccentChars(int id, bool? IgnoreAccentChars)
++        {
++            SqlCeCommand cmd = MSSQLCEConn.CreateCommand(Parent.CurrentUser);
++            cmd.CommandText = "UPDATE \"Settings\" SET ignore_accent_chars=@value WHERE id=@id";
++            cmd.Parameters.Add("@id", id);
++            cmd.Parameters.Add("@value", IgnoreAccentChars.HasValue ? IgnoreAccentChars : DBNull.Value as object);
++
++            MSSQLCEConn.ExecuteNonQuery(cmd);
++
++            //Save to cache
++            Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsIgnoreAccentChars, id, Cache.DefaultSettingsValidationTime)] = IgnoreAccentChars;
++        }
++
+ 		/// <summary>
+ 		/// Gets the confirm demote.
+ 		/// </summary>
+@@ -1671,10 +1707,10 @@ public static int CreateNewSettings(ParentClass Parent, bool defaultBoxSizes)
+ 			cmd = MSSQLCEConn.CreateCommand(Parent.CurrentUser);
+ 			cmd.CommandText = "INSERT INTO \"Settings\"" +
+ 							  "(snooze_options, multiple_choice_options, query_types, type_gradings, synonym_gradings, query_directions, cardstyle, boxes, " +
+-							  "autoplay_audio, case_sensitive, confirm_demote, enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, " +
++                              "autoplay_audio, case_sensitive,ignore_accent_chars, confirm_demote, enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, " +
+ 							  "show_images, stripchars, auto_boxsize, pool_empty_message_shown, show_statistics, skip_correct_answers, use_lm_stylesheets, question_culture, answer_culture)" +
+ 							  "VALUES(@snooze_options_id, @multiple_choice_options_id, @query_types_id, @type_gradings_id, @synonym_gradings_id, @query_directions_id, " +
+-							  "@card_styles_id, @boxes_id, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, 'en', 'en'); SELECT @@IDENTITY";
++                              "@card_styles_id, @boxes_id, null, null, null, null, null, null, null, null, null, null, null ,null, null, null, null, null, 'en', 'en'); SELECT @@IDENTITY";
+ 			cmd.Parameters.Add("@snooze_options_id", snoozeOptionsId);
+ 			cmd.Parameters.Add("@multiple_choice_options_id", multipleChoiceOptionsId);
+ 			cmd.Parameters.Add("@query_types_id", queryTypesId);
+@@ -1748,10 +1784,10 @@ public static int CreateNewDefaultSettings(ParentClass Parent)
+ 			cmd = MSSQLCEConn.CreateCommand(Parent.CurrentUser);
+ 			cmd.CommandText = "INSERT INTO \"Settings\"" +
+ 							  "(snooze_options, multiple_choice_options, query_types, type_gradings, synonym_gradings, query_directions, cardstyle, boxes, " +
+-							  "autoplay_audio, case_sensitive, confirm_demote, enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, " +
++                              "autoplay_audio, case_sensitive, ignore_accent_chars,confirm_demote, enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, " +
+ 							  "show_images, stripchars, auto_boxsize, pool_empty_message_shown, show_statistics, skip_correct_answers, use_lm_stylesheets, question_culture, answer_culture)" +
+ 							  "VALUES(@snooze_options_id, @multiple_choice_options_id, @query_types_id, @type_gradings_id, @synonym_gradings_id, @query_directions_id, " +
+-							  "@card_styles_id, @boxes_id, 1, 0, 0, 0, 0, 0, 1, 0, 1, @stripchars, 0, 0, 1, 0, 1, 'en', 'en'); SELECT @@IDENTITY";
++							  "@card_styles_id, @boxes_id, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, @stripchars, 0, 0, 1, 0, 1, 'en', 'en'); SELECT @@IDENTITY";
+ 			cmd.Parameters.Add("@snooze_options_id", snoozeOptionsId);
+ 			cmd.Parameters.Add("@multiple_choice_options_id", multipleChoiceOptionsId);
+ 			cmd.Parameters.Add("@query_types_id", queryTypesId);
+@@ -1829,10 +1865,10 @@ public static int CreateNewAllowedSettings(ParentClass Parent)
+ 			cmd = MSSQLCEConn.CreateCommand(Parent.CurrentUser);
+ 			cmd.CommandText = "INSERT INTO \"Settings\"" +
+ 							  "(snooze_options, multiple_choice_options, query_types, type_gradings, synonym_gradings, query_directions, cardstyle, boxes, " +
+-							  "autoplay_audio, case_sensitive, confirm_demote, enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, " +
++                              "autoplay_audio, case_sensitive, ignore_accent_chars, confirm_demote, enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, " +
+ 							  "show_images, stripchars, auto_boxsize, pool_empty_message_shown, show_statistics, skip_correct_answers, use_lm_stylesheets, question_culture, answer_culture)" +
+ 							  "VALUES(@snooze_options_id, @multiple_choice_options_id, @query_types_id, @type_gradings_id, @synonym_gradings_id, @query_directions_id, " +
+-							  "@card_styles_id, @boxes_id, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 'en', 'en'); SELECT @@IDENTITY";
++							  "@card_styles_id, @boxes_id, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 'en', 'en'); SELECT @@IDENTITY";
+ 			cmd.Parameters.Add("@snooze_options_id", snoozeOptionsId);
+ 			cmd.Parameters.Add("@multiple_choice_options_id", multipleChoiceOptionsId);
+ 			cmd.Parameters.Add("@query_types_id", queryTypesId);
+diff --git a/Source Code/Main/MLifter.DAL/DB/PostgreSQL/MLifterDB.sql b/Source Code/Main/MLifter.DAL/DB/PostgreSQL/MLifterDB.sql
+index 7880365..291cdf8 100644
+--- a/Source Code/Main/MLifter.DAL/DB/PostgreSQL/MLifterDB.sql	
++++ b/Source Code/Main/MLifter.DAL/DB/PostgreSQL/MLifterDB.sql	
+@@ -67,7 +67,7 @@ CREATE OR REPLACE FUNCTION "CreateNewSetting"()
+ 			(null, null, null, null, null, null, null, null, null);
+ 
+ 		INSERT INTO "Settings"
+-			(snooze_options, query_types, query_directions, multiple_choice_options, synonym_gradings, type_gradings, cardstyle, boxes, autoplay_audio, case_sensitive, confirm_demote, 
++			(snooze_options, query_types, query_directions, multiple_choice_options, synonym_gradings, type_gradings, cardstyle, boxes, autoplay_audio, case_sensitive,ignore_accent_chars, confirm_demote, 
+ 			enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, show_images, stripchars, auto_boxsize, pool_empty_message_shown, 
+ 			show_statistics, skip_correct_answers, use_lm_stylesheets, question_culture, answer_culture)
+ 			VALUES
+@@ -80,7 +80,7 @@ CREATE OR REPLACE FUNCTION "CreateNewSetting"()
+ 				currval('"TypeGradings_id_seq"'),
+ 				currval('"CardStyles_id_seq"'),
+ 				currval('"Boxes_id_seq"'),
+-				null, null , null,
++				null, null , null, null,
+ 				null, null, null, null, null, null, null, null, null,
+ 				null, null, null, 'en', 'en'
+ 			);
+@@ -494,6 +494,7 @@ CREATE TABLE "Settings" (
+ 	id serial PRIMARY KEY NOT NULL,
+ 	autoplay_audio boolean,
+ 	case_sensitive boolean,
++	ignore_accent_chars boolean,
+ 	confirm_demote boolean,
+ 	enable_commentary boolean,
+ 	correct_on_the_fly boolean,
+@@ -1719,6 +1720,7 @@ CREATE TABLE "LearnLog" (
+ 	answer text,
+ 	direction direction,
+ 	case_sensitive boolean,
++	ignore_accent_chars boolean,
+ 	correct_on_the_fly boolean,
+ 	percentage_known integer,
+ 	percentage_required integer,
+@@ -1944,7 +1946,7 @@ CREATE OR REPLACE FUNCTION "CreateNewLearningModule"(character, integer, text)
+ 			(10, 20, 50, 100, 250, 500, 1000, 2000, 4000);
+ 
+ 		INSERT INTO "Settings"
+-			(snooze_options, query_types, query_directions, multiple_choice_options, synonym_gradings, type_gradings, boxes, autoplay_audio, case_sensitive, confirm_demote, 
++			(snooze_options, query_types, query_directions, multiple_choice_options, synonym_gradings, type_gradings, boxes, autoplay_audio, case_sensitive,ignore_accent_chars, confirm_demote, 
+ 			enable_commentary, correct_on_the_fly, enable_timer, random_pool, self_assessment, show_images, stripchars, auto_boxsize, pool_empty_message_shown, 
+ 			show_statistics, skip_correct_answers, use_lm_stylesheets, question_culture, answer_culture)
+ 			VALUES
+@@ -1956,7 +1958,7 @@ CREATE OR REPLACE FUNCTION "CreateNewLearningModule"(character, integer, text)
+ 				currval('"SynonymGradings_id_seq"'),
+ 				currval('"TypeGradings_id_seq"'),
+ 				currval('"Boxes_id_seq"'),
+-				TRUE, FALSE, FALSE,
++				TRUE, FALSE, FALSE,FALSE,
+ 				FALSE, FALSE, FALSE, TRUE, FALSE, TRUE, '!,.?;', FALSE, FALSE,
+ 				TRUE, FALSE, TRUE, 'en', 'en'
+ 			);
+@@ -2035,6 +2037,7 @@ $$ LANGUAGE 'plpgsql' SECURITY DEFINER;
+ DROP TYPE IF EXISTS "AllSettings" CASCADE;
+ CREATE TYPE "AllSettings" AS (autoplay_audio boolean, 
+ 			      case_sensitive boolean,
++				  ignore_accent_chars boolean,
+ 			      confirm_demote boolean,
+ 			      enable_commentary boolean,
+ 			      correct_on_the_fly boolean,
+@@ -2128,7 +2131,7 @@ CREATE OR REPLACE FUNCTION "GetAllSettings"(settings_id integer) RETURNS "AllSet
+ 	DECLARE
+ 	   result "AllSettings";
+ 	BEGIN
+-		SELECT 	"Settings".autoplay_audio, "Settings".case_sensitive, "Settings".confirm_demote, "Settings".enable_commentary, "Settings".correct_on_the_fly, "Settings".enable_timer, "Settings".synonym_gradings,
++		SELECT 	"Settings".autoplay_audio, "Settings".case_sensitive,"Settings".ignore_accent_chars, "Settings".confirm_demote, "Settings".enable_commentary, "Settings".correct_on_the_fly, "Settings".enable_timer, "Settings".synonym_gradings,
+ 			"Settings".type_gradings, "Settings".multiple_choice_options, "Settings".query_directions, "Settings".query_types, 
+ 			"Settings".random_pool,	"Settings".self_assessment, "Settings".show_images, "Settings".stripchars, "Settings".question_culture, "Settings".answer_culture, "Settings".question_caption,
+ 			"Settings".answer_caption, "Settings".logo, "Settings".auto_boxsize, "Settings".pool_empty_message_shown, "Settings".show_statistics, "Settings".skip_correct_answers, "Settings".snooze_options, 
+diff --git a/Source Code/Main/MLifter.DAL/DB/PostgreSQL/PgSqlLearnLoggingConnector.cs b/Source Code/Main/MLifter.DAL/DB/PostgreSQL/PgSqlLearnLoggingConnector.cs
+index d46ecb8..5097186 100644
+--- a/Source Code/Main/MLifter.DAL/DB/PostgreSQL/PgSqlLearnLoggingConnector.cs	
++++ b/Source Code/Main/MLifter.DAL/DB/PostgreSQL/PgSqlLearnLoggingConnector.cs	
+@@ -70,8 +70,8 @@ public void CreateLearnLogEntry(LearnLogStruct learnLog)
+             {
+                 using (NpgsqlCommand cmd = con.CreateCommand())
+                 {
+-                    cmd.CommandText = "INSERT INTO \"LearnLog\" (session_id, user_id, lm_id, cards_id, old_box, new_box, timestamp, duration, learn_mode, move_type, answer, direction, case_sensitive, correct_on_the_fly, percentage_known, percentage_required) ";
+-                    cmd.CommandText += " VALUES(:sid, :uid, :lmid, :cid, :obox, :nbox, :ts, :dur, :lmode, :mtype, :answ, :dir, :csen, :cotf, :pknown, :preq); ";
++                    cmd.CommandText = "INSERT INTO \"LearnLog\" (session_id, user_id, lm_id, cards_id, old_box, new_box, timestamp, duration, learn_mode, move_type, answer, direction, case_sensitive,ignore_accent_chars, correct_on_the_fly, percentage_known, percentage_required) ";
++                    cmd.CommandText += " VALUES(:sid, :uid, :lmid, :cid, :obox, :nbox, :ts, :dur, :lmode, :mtype, :answ, :dir, :csen,:iach, :cotf, :pknown, :preq); ";
+ 
+                     if (learnLog.MoveType != MoveType.Manual && answeredCardCorrect)
+                         cmd.CommandText += "UPDATE \"LearningSessions\" SET sum_right=sum_right + 1 WHERE id=:sid AND user_id=:uid AND lm_id=:lmid; ";
+@@ -106,6 +106,7 @@ public void CreateLearnLogEntry(LearnLogStruct learnLog)
+                     cmd.Parameters.Add("answ", learnLog.Answer);
+                     cmd.Parameters.Add("dir", learnLog.Direction.Value.ToString());
+                     cmd.Parameters.Add("csen", learnLog.CaseSensitive);
++                    cmd.Parameters.Add("iach", learnLog.CaseSensitive);
+                     cmd.Parameters.Add("cotf", learnLog.CorrectOnTheFly);
+                     cmd.Parameters.Add("pknown", learnLog.PercentageKnown);
+                     cmd.Parameters.Add("preq", learnLog.PercentageRequired);
+diff --git a/Source Code/Main/MLifter.DAL/DB/PostgreSQL/PgSqlSettingsConnector.cs b/Source Code/Main/MLifter.DAL/DB/PostgreSQL/PgSqlSettingsConnector.cs
+index 277e9e3..14d89cd 100644
+--- a/Source Code/Main/MLifter.DAL/DB/PostgreSQL/PgSqlSettingsConnector.cs	
++++ b/Source Code/Main/MLifter.DAL/DB/PostgreSQL/PgSqlSettingsConnector.cs	
+@@ -69,6 +69,7 @@ private void GetSettingsValue(int settingsId, CacheObject cacheObjectType, out o
+                     //read the values
+                     bool? autoplayAudio = DbValueConverter.Convert<bool>(reader["autoplay_audio"]);
+                     bool? caseSensitive = DbValueConverter.Convert<bool>(reader["case_sensitive"]);
++                    bool? ignoreAccentChars = DbValueConverter.Convert<bool>(reader["ignore_accent_chars"]);
+                     bool? confirmDemote = DbValueConverter.Convert<bool>(reader["confirm_demote"]);
+                     bool? enableCommentary = DbValueConverter.Convert<bool>(reader["enable_commentary"]);
+                     bool? correctOnTheFly = DbValueConverter.Convert<bool>(reader["correct_on_the_fly"]);
+@@ -105,6 +106,7 @@ private void GetSettingsValue(int settingsId, CacheObject cacheObjectType, out o
+                     DateTime expires = DateTime.Now.Add(Cache.DefaultSettingsValidationTime);
+                     Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsAutoPlayAudio, settingsId, expires)] = autoplayAudio;
+                     Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsCaseSensetive, settingsId, expires)] = caseSensitive;
++                    Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsIgnoreAccentChars, settingsId, expires)] = ignoreAccentChars;
+                     Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsConfirmDemote, settingsId, expires)] = confirmDemote;
+                     Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsEnableCommentary, settingsId, expires)] = enableCommentary;
+                     Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsCorrectOnTheFly, settingsId, expires)] = correctOnTheFly;
+@@ -141,6 +143,7 @@ private void GetSettingsValue(int settingsId, CacheObject cacheObjectType, out o
+                     {
+                         case CacheObject.SettingsAutoPlayAudio: cacheValue = autoplayAudio; break;
+                         case CacheObject.SettingsCaseSensetive: cacheValue = caseSensitive; break;
++                        case CacheObject.SettingsIgnoreAccentChars: cacheValue = ignoreAccentChars; break;
+                         case CacheObject.SettingsConfirmDemote: cacheValue = confirmDemote; break;
+                         case CacheObject.SettingsEnableCommentary: cacheValue = enableCommentary; break;
+                         case CacheObject.SettingsCorrectOnTheFly: cacheValue = correctOnTheFly; break;
+@@ -1065,6 +1068,33 @@ public void SetCaseSensitive(int id, bool? CaseSensetive)
+             }
+         }
+ 
++        public bool? GetIgnoreAccentChars(int id)
++        {
++            object cacheValue;
++            if (!SettingsCached(id, CacheObject.SettingsIgnoreAccentChars, out cacheValue))      //if settings are not in Cache --> load them
++                GetSettingsValue(id, CacheObject.SettingsIgnoreAccentChars, out cacheValue);    //Saves the current Settings from the DB to the Cache
++            return cacheValue as bool?;
++        }
++
++
++        public void SetIgnoreAccentChars(int id, bool? IgnoreAccentChars)
++        {
++            using (NpgsqlConnection con = PostgreSQLConn.CreateConnection(Parent.CurrentUser))
++            {
++                using (NpgsqlCommand cmd = con.CreateCommand())
++                {
++                    cmd.CommandText = "UPDATE \"Settings\" SET ignore_accent_chars=:value WHERE id=:id";
++                    cmd.Parameters.Add("id", id);
++                    cmd.Parameters.Add("value", IgnoreAccentChars);
++
++                    PostgreSQLConn.ExecuteNonQuery(cmd, Parent.CurrentUser);
++
++                    //Save to cache
++                    Parent.CurrentUser.Cache[ObjectLifetimeIdentifier.Create(CacheObject.SettingsIgnoreAccentChars, id, Cache.DefaultSettingsValidationTime)] = IgnoreAccentChars;
++                }
++            }
++        }
++
+         public bool? GetConfirmDemote(int id)
+         {
+             object cacheValue;
+diff --git a/Source Code/Main/MLifter.DAL/Interfaces/DB/IDbLearnLoggingConnector.cs b/Source Code/Main/MLifter.DAL/Interfaces/DB/IDbLearnLoggingConnector.cs
+index d370663..03508b4 100644
+--- a/Source Code/Main/MLifter.DAL/Interfaces/DB/IDbLearnLoggingConnector.cs	
++++ b/Source Code/Main/MLifter.DAL/Interfaces/DB/IDbLearnLoggingConnector.cs	
+@@ -110,6 +110,10 @@ public struct LearnLogStruct
+ 		/// Was case sensitivity enabled?
+ 		/// </summary>
+ 		public bool? CaseSensitive;
++        /// <summary>
++        /// Was ignore accented chars enabled?
++        /// </summary>
++        public bool? IgnoreAccentChars;
+ 		/// <summary>
+ 		/// Was correct on the fly enabled?
+ 		/// </summary>
+diff --git a/Source Code/Main/MLifter.DAL/Interfaces/DB/IDbSettingsConnector.cs b/Source Code/Main/MLifter.DAL/Interfaces/DB/IDbSettingsConnector.cs
+index 566fa89..81f4b31 100644
+--- a/Source Code/Main/MLifter.DAL/Interfaces/DB/IDbSettingsConnector.cs	
++++ b/Source Code/Main/MLifter.DAL/Interfaces/DB/IDbSettingsConnector.cs	
+@@ -50,6 +50,9 @@ interface IDbSettingsConnector
+         bool? GetCaseSensitive(int id);
+         void SetCaseSensitive(int id, bool? CaseSensetive);
+ 
++        bool? GetIgnoreAccentChars(int id);
++        void SetIgnoreAccentChars(int id, bool? IgnoreAccentChars);
++
+         Dictionary<CommentarySoundIdentifier, IMedia> GetCommentarySounds(int id);
+         void SetCommentarySounds(int id, Dictionary<CommentarySoundIdentifier, IMedia> CommentarySounds);
+ 
+diff --git a/Source Code/Main/MLifter.DAL/Interfaces/IQueryOptions.cs b/Source Code/Main/MLifter.DAL/Interfaces/IQueryOptions.cs
+index 20fccfe..766ba4b 100644
+--- a/Source Code/Main/MLifter.DAL/Interfaces/IQueryOptions.cs	
++++ b/Source Code/Main/MLifter.DAL/Interfaces/IQueryOptions.cs	
+@@ -229,6 +229,10 @@ public enum EQueryOption
+ 		/// Display statistics.
+ 		/// </summary>
+ 		Stats = 4,
++        /// <summary>
++        /// Typed answers should be ignored if accented.
++        /// </summary>
++        IgnoreAccentChars = 8,
+ 		/// <summary>
+ 		/// Display images.
+ 		/// </summary>
+diff --git a/Source Code/Main/MLifter.DAL/Preview/PreviewSettings.cs b/Source Code/Main/MLifter.DAL/Preview/PreviewSettings.cs
+index a75d12a..27fb27d 100644
+--- a/Source Code/Main/MLifter.DAL/Preview/PreviewSettings.cs	
++++ b/Source Code/Main/MLifter.DAL/Preview/PreviewSettings.cs	
+@@ -227,6 +227,23 @@ public ICardStyle Style
+ 			}
+ 		}
+ 
++        /// <summary>
++        /// Gets or sets a value indicating whether [Ignore Accent Chars].
++        /// </summary>
++        /// <value><c>true</c> if [Ignore Accent Chars]; otherwise, <c>false</c>.</value>
++        /// <remarks>Documented by Dev03, 2013-11-12</remarks>
++        public bool? IgnoreAccentChars
++        {
++            get
++            {
++                throw new NotImplementedException();
++            }
++            set
++            {
++                throw new NotImplementedException();
++            }
++        }
++
+ 		/// <summary>
+ 		/// Gets or sets a value indicating whether user confirmation is required to confirm demote.
+ 		/// </summary>
+diff --git a/Source Code/Main/MLifter.DAL/Resources/MsSqlCeDbCreateScript.sql b/Source Code/Main/MLifter.DAL/Resources/MsSqlCeDbCreateScript.sql
+index 7f9d596..16c944f 100644
+--- a/Source Code/Main/MLifter.DAL/Resources/MsSqlCeDbCreateScript.sql	
++++ b/Source Code/Main/MLifter.DAL/Resources/MsSqlCeDbCreateScript.sql	
+@@ -156,6 +156,7 @@ CREATE TABLE Settings
+ 	id int PRIMARY KEY IDENTITY,
+ 	autoplay_audio bit,
+ 	case_sensitive bit,
++	ignore_accent_chars bit,
+ 	confirm_demote bit,
+ 	enable_commentary bit,
+ 	correct_on_the_fly bit,
+@@ -390,6 +391,7 @@ CREATE TABLE LearnLog
+ 	answer ntext,
+ 	direction nvarchar(100),
+ 	case_sensitive bit,
++	ignore_accent_chars bit,
+ 	correct_on_the_fly bit,
+ 	percentage_known int,
+ 	percentage_required int,
+diff --git a/Source Code/Main/MLifter.DAL/Tools/Cache.cs b/Source Code/Main/MLifter.DAL/Tools/Cache.cs
+index e0a97b7..e93d1b5 100644
+--- a/Source Code/Main/MLifter.DAL/Tools/Cache.cs	
++++ b/Source Code/Main/MLifter.DAL/Tools/Cache.cs	
+@@ -604,6 +604,10 @@ public enum CacheObject
+ 		/// SettingsCaseSensetive
+ 		/// </summary>
+ 		SettingsCaseSensetive,
++        /// <summary>
++        /// SettingsIgnoreAccentChars
++        /// </summary>
++        SettingsIgnoreAccentChars,
+ 		/// <summary>
+ 		/// SettingsConfirmDemote
+ 		/// </summary>
+diff --git a/Source Code/Main/MLifter.DAL/Transformer/V17/Converter.cs b/Source Code/Main/MLifter.DAL/Transformer/V17/Converter.cs
+index c822b8d..a9cd679 100644
+--- a/Source Code/Main/MLifter.DAL/Transformer/V17/Converter.cs	
++++ b/Source Code/Main/MLifter.DAL/Transformer/V17/Converter.cs	
+@@ -478,6 +478,7 @@ public MLifter.DAL.Interfaces.IDictionary Load(string srcFile, string dstFile)
+ 					}
+ 
+ 					dictionary.DefaultSettings.CaseSensitive = ((((int)EQueryOption.CaseSensitive) & queryOptions) > 0);
++                    dictionary.DefaultSettings.IgnoreAccentChars = ((((int)EQueryOption.IgnoreAccentChars) & queryOptions) > 0);
+ 					dictionary.DefaultSettings.EnableTimer = ((((int)EQueryOption.CountDown) & queryOptions) > 0);
+ 					dictionary.DefaultSettings.ShowStatistics = ((((int)EQueryOption.Stats) & queryOptions) > 0);
+ 					dictionary.DefaultSettings.ShowImages = ((((int)EQueryOption.Images) & queryOptions) > 0);
+diff --git a/Source Code/Main/MLifter.DAL/XML/XmlPresetSettings.cs b/Source Code/Main/MLifter.DAL/XML/XmlPresetSettings.cs
+index 3bede72..2294016 100644
+--- a/Source Code/Main/MLifter.DAL/XML/XmlPresetSettings.cs	
++++ b/Source Code/Main/MLifter.DAL/XML/XmlPresetSettings.cs	
+@@ -314,6 +314,19 @@ public ICardStyle Style
+ 			set { m_CaseSensitive = value.GetValueOrDefault(); }
+ 		}
+ 
++        private bool m_IgnoreAccentChars;
++        /// <summary>
++        /// Gets or sets a value indicating whether the answer ignores accented chars.
++        /// </summary>
++        /// <value>
++        ///   <c>true</c> if ignores accented chars; otherwise, <c>false</c>.
++        /// </value>
++        public bool? IgnoreAccentChars
++        {
++            get { return m_IgnoreAccentChars; }
++            set { m_IgnoreAccentChars = value.GetValueOrDefault(); }
++        }
++
+ 		private bool m_ConfirmDemote;
+ 		/// <summary>
+ 		/// Gets or sets a value indicating whether user confirmation is required to confirm demote.
+diff --git a/Source Code/Main/MLifter.DAL/XML/XmlSettings.cs b/Source Code/Main/MLifter.DAL/XML/XmlSettings.cs
+index 2b2958c..3c11fdd 100644
+--- a/Source Code/Main/MLifter.DAL/XML/XmlSettings.cs	
++++ b/Source Code/Main/MLifter.DAL/XML/XmlSettings.cs	
+@@ -278,6 +278,21 @@ void gradeSynonyms_ValueChanged(object sender, EventArgs e)
+             }
+         }
+ 
++        public bool? IgnoreAccentChars
++        {
++            get
++            {
++                return Check(EQueryOption.IgnoreAccentChars);
++            }
++            set
++            {
++                if (value.GetValueOrDefault())
++                    Set(EQueryOption.IgnoreAccentChars);
++                else
++                    Unset(EQueryOption.IgnoreAccentChars);
++            }
++        }
++
+         public bool? ConfirmDemote
+         {
+             get
+@@ -937,6 +952,19 @@ public IGradeSynonyms GradeSynonyms
+         }
+ 
+         [IgnoreCopy]
++        public bool? IgnoreAccentChars
++        {
++            get
++            {
++                throw new Exception("The method or operation is not implemented.");
++            }
++            set
++            {
++                throw new Exception("The method or operation is not implemented.");
++            }
++        }
++
++        [IgnoreCopy]
+         public bool? ConfirmDemote
+         {
+             get
+@@ -1440,6 +1468,19 @@ public ICardStyle Style
+         }
+ 
+         [IgnoreCopy]
++        public bool? IgnoreAccentChars
++        {
++            get
++            {
++                throw new Exception("The method or operation is not implemented.");
++            }
++            set
++            {
++                throw new Exception("The method or operation is not implemented.");
++            }
++        }
++
++        [IgnoreCopy]
+         public bool? ConfirmDemote
+         {
+             get
+@@ -1906,6 +1947,19 @@ public ICardStyle Style
+         }
+ 
+         [IgnoreCopy]
++        public bool? IgnoreAccentChars
++        {
++            get
++            {
++                throw new Exception("The method or operation is not implemented.");
++            }
++            set
++            {
++                throw new Exception("The method or operation is not implemented.");
++            }
++        }
++
++        [IgnoreCopy]
+         public bool? ConfirmDemote
+         {
+             get
+@@ -2370,6 +2424,19 @@ public ICardStyle Style
+         }
+ 
+         [IgnoreCopy]
++        public bool? IgnoreAccentChars
++        {
++            get
++            {
++                throw new Exception("The method or operation is not implemented.");
++            }
++            set
++            {
++                throw new Exception("The method or operation is not implemented.");
++            }
++        }
++
++        [IgnoreCopy]
+         public bool? ConfirmDemote
+         {
+             get
+diff --git a/Source Code/Main/MLifter.SettingsManager/DAL/SettingsTemplate.cs b/Source Code/Main/MLifter.SettingsManager/DAL/SettingsTemplate.cs
+index 68e8a24..43a3e46 100644
+--- a/Source Code/Main/MLifter.SettingsManager/DAL/SettingsTemplate.cs	
++++ b/Source Code/Main/MLifter.SettingsManager/DAL/SettingsTemplate.cs	
+@@ -95,6 +95,8 @@ public IQueryMultipleChoiceOptions MultipleChoiceOptions
+ 
+         public bool? CaseSensitive { get; set; }
+ 
++        public bool? IgnoreAccentChars { get; set; }
++
+         public bool? ConfirmDemote { get; set; }
+ 
+         public bool? EnableCommentary { get; set; }
+-- 
+1.8.4.msysgit.0
+
