@@ -105,6 +105,13 @@ namespace MLifter.DAL.Interfaces
         /// <remarks>Documented by Dev03, 2007-09-04</remarks>
         [ValueCopy]
         bool? CaseSensitive { get; set; }
+        /// Gets or sets a value indicating whether [Ignore Accent Chars].
+        /// </summary>
+        /// <value><c>true</c> if [Ignore Accent Chars]; otherwise, <c>false</c>.</value>
+        /// <remarks>Documented by 2013-11-12</remarks>
+        [ValueCopy]
+        bool? IgnoreAccentChars { get; set; }
+        /// <summary>
         /// <summary>
         /// Gets or sets a value indicating whether user confirmation is required to confirm demote.
         /// </summary>

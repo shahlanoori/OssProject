@@ -82,6 +82,14 @@ namespace MLifter.Components
             set { caseSensitive = value; }
         }
 
+        private bool ignoreAccentChars;
+        [Browsable(false), ReadOnly(true)]
+        public bool IgnoreAccentChars
+        {
+            get { return ignoreAccentChars; }
+            set { ignoreAccentChars = value; }
+        }
+
         private bool correctOnTheFly;
         [Browsable(false), ReadOnly(true)]
         public bool CorrectOnTheFly
@@ -376,8 +384,8 @@ namespace MLifter.Components
                     strg = str;
                 strg = validChar.Replace(strg, string.Empty);
                 strg = RemoveUnicodeFormatChars(strg); //fix for [ML-588]  MLifterTextbox: Unicode control characters in answer cause comparison to fail
-                
-                strg = strg.ReplaceIgnoreCharacter(); //Fix for first bug
+
+                strg = IgnoreAccentChars ? strg.ReplaceIgnoreCharacter() : strg; //Fix for bug 2: If the checkbox for Ignore Accent Chars is checked the accnted chars will be replaced with the unaccented one.
                 openSynonyms.Add(RemoveIgnoreChars(strg));
             }
 
@@ -401,7 +409,7 @@ namespace MLifter.Components
             {
                 string strg = CaseSensitive ? str.Trim() : str.ToLower().Trim();
                 strg = RemoveIgnoreChars(strg);
-                strg = strg.ReplaceIgnoreCharacter(); //Fix for first bug
+                strg = IgnoreAccentChars ? strg.ReplaceIgnoreCharacter() : strg;//Fix for bug 2: If the checkbox for Ignore Accent Chars is checked the accnted chars will be replaced with the unaccented one.
 
                 if (openSynonyms.Contains(strg))
                 {
