@@ -376,7 +376,8 @@ namespace MLifter.Components
                     strg = str;
                 strg = validChar.Replace(strg, string.Empty);
                 strg = RemoveUnicodeFormatChars(strg); //fix for [ML-588]  MLifterTextbox: Unicode control characters in answer cause comparison to fail
-
+                
+                strg = strg.ReplaceIgnoreCharacter(); //Fix for first bug
                 openSynonyms.Add(RemoveIgnoreChars(strg));
             }
 
@@ -400,6 +401,7 @@ namespace MLifter.Components
             {
                 string strg = CaseSensitive ? str.Trim() : str.ToLower().Trim();
                 strg = RemoveIgnoreChars(strg);
+                strg = strg.ReplaceIgnoreCharacter(); //Fix for first bug
 
                 if (openSynonyms.Contains(strg))
                 {
@@ -769,6 +771,33 @@ namespace MLifter.Components
                 ForeColor = orgForeColor;
             }
         }
+
+    }
+
+    public static class IgnoredChar
+    {
+
+
+        static Dictionary<string, string> IgnoreChars
+        {
+            get
+            {
+                return new Dictionary<string, string> { { "é", "e" }, { "è", "e" }, { "ê", "e" } };
+            }
+        }
+
+        public static string ReplaceIgnoreCharacter(this string input)
+        {
+            var replacedAnswer = input;
+            foreach (var ignoreChar in IgnoreChars.Keys)
+            {
+                if (input.Contains(ignoreChar))
+                    replacedAnswer = input.Replace(ignoreChar, IgnoreChars[ignoreChar]);
+            }
+
+            return replacedAnswer;
+        }
+
 
     }
 }
