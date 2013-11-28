@@ -558,6 +558,7 @@ namespace MLifter.Properties {
             get {
                 return ((int)(this["TIMER_MinSeconds"]));
             }
+            set { this["TIMER_MinSeconds"] = value; }
         }
         
         [global::System.Configuration.ApplicationScopedSettingAttribute()]
